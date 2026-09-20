@@ -6,8 +6,6 @@ import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -16,6 +14,8 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+
+load_dotenv()
 
 # ─────────────────────────── КОНФИГУРАЦИЯ ───────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")        # токен от @BotFather
