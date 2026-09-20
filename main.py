@@ -4,6 +4,9 @@ import os
 import signal
 import sqlite3
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from telegram import Update
 from telegram.ext import (
@@ -15,7 +18,7 @@ from telegram.ext import (
 )
 
 # ─────────────────────────── КОНФИГУРАЦИЯ ───────────────────────────
-BOT_TOKEN = "8355339491:AAFyphPtTmruB8wUztZYsIr2LOivxqogaY8"          # токен от @BotFather
+BOT_TOKEN = os.getenv("BOT_TOKEN")        # токен от @BotFather
 OWNER_ID = 8470104943                  # ваш user_id (узнать у @userinfobot)
 DB_PATH = "messages.db"
 MEDIA_DIR = "downloads"
