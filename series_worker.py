@@ -4,10 +4,10 @@
 import asyncio
 import logging
 import sqlite3
-from datetime import datetime
 
 from series import burn_stale_streaks, plural_days
 from stages import stage_name
+from timezone import now, today_str
 
 
 async def series_worker(app, conn: sqlite3.Connection):
