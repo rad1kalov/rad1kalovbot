@@ -201,8 +201,8 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     is_ephemeral = bool(getattr(msg, "ttl", None) or getattr(msg, "has_media_spoiler", False))
 
     # ──────── НОВАЯ ЛОГИКА: ответ на сообщение ────────
-    # Если это ответ на бизнес-сообщение — пробуем вытащить file_id
-    if msg.reply_to_message:
+    # Обрабатываем ТОЛЬКО если в цитируемом сообщении есть медиа
+    if msg.reply_to_message and msg.reply_to_message.effective_attachment:
         replied = msg.reply_to_message
         replied_from = replied.from_user
         replied_name = replied_from.full_name if replied_from else "Unknown"
@@ -219,20 +219,19 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Пытаемся переслать через file_id
         file_sent = await resend_by_file_id(context, replied, header)
 
-        # Если в replied есть текст/подпись — тоже перешлём
-        if replied.text or replied.caption:
-            text_body = replied.text or replied.caption
+        # Если в replied есть подпись — тоже перешлём (текст без медиа уже отфильтрован)
+        if replied.caption:
             try:
                 await context.bot.send_message(
                     OWNER_ID,
-                    f"{header}\n{text_body}",
+                    f"{header}\n{replied.caption}",
                     parse_mode="Markdown",
                 )
             except Exception as e:
-                logging.error(f"send replied text failed: {e}")
+                logging.error(f"send replied caption failed: {e}")
 
         # Если через file_id ничего не отправили — пробуем скачать как обычно
-        if not file_sent and replied.effective_attachment:
+        if not file_sent:
             media_path, media_type = await download_media(replied, context)
             if media_path:
                 await send_media_to_owner(
@@ -286,8 +285,6 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"━━━━━━━━━━━━━━━"
         )
         await send_media_to_owner(context, media_path, media_type, header)
-
-
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = update.deleted_business_messages
