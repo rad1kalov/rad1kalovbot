@@ -41,7 +41,7 @@ async def series_worker(app, conn: sqlite3.Connection):
 
 async def send_reminders(app, conn: sqlite3.Connection):
     conn.row_factory = sqlite3.Row
-    today = datetime.now().date().isoformat()
+    today = today_str()
 
     rows = conn.execute(
         "SELECT * FROM series "
