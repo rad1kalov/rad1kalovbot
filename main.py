@@ -20,6 +20,10 @@ from series import process_message, build_summary
 from series_commands import handle_series_command
 from series_worker import series_worker
 
+from tn_commands import handle_time_command
+from tn_worker import name_worker
+from tn_db import init_settings_table
+
 load_dotenv()
 
 # ─────────────────────────── КОНФИГУРАЦИЯ ───────────────────────────
@@ -59,7 +63,8 @@ def init_db() -> sqlite3.Connection:
 
 
 DB = init_db()
-init_series_db(DB)   # ← добавить
+init_series_db(DB)
+init_settings_table(DB)
 
 
 # ─────────────────────────── СКАЧИВАНИЕ МЕДИА ───────────────────────
@@ -200,14 +205,15 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     msg = update.business_message
     if not msg:
         return
+        
 
     # ───── НОВОЕ: обработка команд серии ─────
     if msg.text and msg.text.startswith("."):
-        handled = await handle_series_command(update, context, DB)
-        if handled:
-            # всё равно сохраним команду в БД для истории
-            # (можно пропустить, если не нужно)
-            return
+    if await handle_time_command(update, context, DB):
+        return
+    handled = await handle_series_command(update, context, DB)
+    if handled:
+        return
     # ─────────────────────────────────────────
 
     # ... существующий код ниже без изменений ...
@@ -380,6 +386,7 @@ def main():
         await app.updater.start_polling()
         
         worker_task = asyncio.create_task(series_worker(app, DB))
+        name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=3600))
 
         stop_event = asyncio.Event()
 
@@ -398,10 +405,12 @@ def main():
         await stop_event.wait()
         
         worker_task.cancel()
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            pass
+        name_task.cancel()
+        for t in (worker_task, name_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
 
         logging.info("Останавливаюсь…")
         await app.updater.stop()
