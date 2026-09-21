@@ -3,12 +3,11 @@
 
 import logging
 import sqlite3
-from datetime import date
 
 from series import plural_days
 from series_db import ensure_series, get_series, log_event
 from stages import stage_name, next_stage, prev_stage
-
+from timezone import today_str
 
 KNOWN_COMMANDS = {
     "streak", "stage", "upgrade", "downgrade",
@@ -153,8 +152,9 @@ async def handle_series_command(update, context,
         await send(f"🔔 Напоминания о скором сгорании серии {status}.")
 
     # ─────── .freeze ───────
+    # ─────── .freeze ───────
     elif cmd == "freeze":
-        today = date.today().isoformat()
+        today = today_str()
         if s["frozen"]:
             await send("❄️ Серия уже заморожена на сегодня.")
         elif s["freezes_left"] <= 0:
