@@ -1,38 +1,72 @@
 import logging
-from aiogram import Router
-from aiogram.filters import Command
-from aiogram.filters.command import CommandObject
-from aiogram.types import Message
+import sqlite3
+from telegram import Update
+from telegram.ext import ContextTypes
+
 import tn_db
 
-router = Router()
+log = logging.getLogger(__name__)
 
-@router.message(Command("time"))
-async def cmd_time(message: Message, command: CommandObject):
-    if not message.business_connection_id:
-        await message.answer("Команда работает только в бизнес-чате.")
-        return
 
-    if message.from_user and message.from_user.first_name:
-        await tn_db.save_first_name(
-            message.business_connection_id,
-            message.from_user.first_name
+async def handle_time_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection
+) -> bool:
+    """
+    Обрабатывает .time <utc>.
+    Возвращает True, если команда была обработана (и вызывающий код
+    должен прекратить дальнейшую обработку сообщения).
+    """
+    msg = update.business_message
+    if not msg or not msg.text:
+        return False
+    if not msg.text.startswith(".time"):
+        return False
+
+    if not msg.business_connection_id:
+        await context.bot.send_message(
+            chat_id=msg.chat_id,
+            text="Команда работает только в бизнес-чате.",
+            business_connection_id=msg.business_connection_id,
         )
+        return True
 
-    if not command.args:
-        await message.answer("Укажи оффсет: .time +3 или .time -5")
-        return
+    # сохраняем first_name владельца
+    if msg.from_user and msg.from_user.first_name:
+        tn_db.save_first_name(conn, msg.business_connection_id, msg.from_user.first_name)
 
-    raw = command.args.strip().replace("+", "")
+    args = msg.text[len(".time"):].strip()
+
+    if not args:
+        await context.bot.send_message(
+            chat_id=msg.chat_id,
+            text="Укажи оффсет: .time +3 или .time -5",
+            business_connection_id=msg.business_connection_id,
+        )
+        return True
+
+    raw = args.replace("+", "")
     try:
         offset = int(raw)
     except ValueError:
-        await message.answer("Оффсет должен быть числом, например: .time +3")
-        return
+        await context.bot.send_message(
+            chat_id=msg.chat_id,
+            text="Оффсет должен быть числом, например: .time +3",
+            business_connection_id=msg.business_connection_id,
+        )
+        return True
 
     if offset < -12 or offset > 14:
-        await message.answer("Оффсет вне допустимого диапазона (- int12..+14).")
-        = return
+        await context.bot.send_message(
+            chat_id=msg.chat_id,
+            text="Оффсет вне допустимого диапазона (-12..+14).",
+            business_connection_id=msg.business_connection_id,
+        )
+        return True
 
-    await tn_db.set _tz_offset(message360.business_connection_id0, offset)
-    await message.answer(f"Оффсет установлен: UTC{offset:+d}")
+    tn_db.set_tz_offset(conn, msg.business_connection_id, offset)
+    await context.bot.send_message(
+        chat_id=msg.chat_id,
+        text=f"Оффсет установлен: UTC{offset:+d}",
+        business_connection_id=msg.business_connection_id,
+    )
+    return True
