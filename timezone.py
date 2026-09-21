@@ -1,7 +1,7 @@
-# tz.py
+# timezone.py
 """Единый источник локального времени с учётом часового пояса."""
 
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone as _tz
 
 # ─── НАСТРОЙКА ─────────────────────────────────────────
 # Смещение твоего часового пояса относительно UTC.
@@ -14,12 +14,12 @@ from datetime import datetime, date, timedelta, timezone
 TZ_OFFSET_HOURS = 3
 # ────────────────────────────────────────────────────────
 
-TZ = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+TZ = _tz(timedelta(hours=TZ_OFFSET_HOURS))
 
 
 def now() -> datetime:
     """Текущее время в твоём часовом поясе (aware)."""
-    return datetime.now(timezone.utc).astimezone(TZ)
+    return datetime.now(_tz.utc).astimezone(TZ)
 
 
 def today_str() -> str:
