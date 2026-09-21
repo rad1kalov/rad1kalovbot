@@ -15,6 +15,11 @@ from telegram.ext import (
     filters,
 )
 
+from series_db import init_series_db
+from series import process_message, build_summary
+from series_commands import handle_series_command
+from series_worker import series_worker
+
 load_dotenv()
 
 # ─────────────────────────── КОНФИГУРАЦИЯ ───────────────────────────
@@ -54,6 +59,7 @@ def init_db() -> sqlite3.Connection:
 
 
 DB = init_db()
+init_series_db(DB)   # ← добавить
 
 
 # ─────────────────────────── СКАЧИВАНИЕ МЕДИА ───────────────────────
@@ -195,6 +201,17 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not msg:
         return
 
+    # ───── НОВОЕ: обработка команд серии ─────
+    if msg.text and msg.text.startswith("."):
+        handled = await handle_series_command(update, context, DB)
+        if handled:
+            # всё равно сохраним команду в БД для истории
+            # (можно пропустить, если не нужно)
+            return
+    # ─────────────────────────────────────────
+
+    # ... существующий код ниже без изменений ...
+
     conn_id = msg.business_connection_id
 
     # Признак одноразового / spoiler-медиа
@@ -285,6 +302,22 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"━━━━━━━━━━━━━━━"
         )
         await send_media_to_owner(context, media_path, media_type, header)
+        
+    # ───── НОВОЕ: обновление серии ─────
+    if not (msg.text and msg.text.startswith(".")):
+        info = process_message(DB, msg.chat_id, msg.business_connection_id, from_name)
+        if info:
+            summary = build_summary(DB, msg.chat_id, info)
+            try:
+                await context.bot.send_message(
+                    chat_id=msg.chat_id,
+                    text=summary,
+                    business_connection_id=msg.business_connection_id,
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logging.error(f"send series summary failed: {e}")
+    # ───────────────────────────────────
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = update.deleted_business_messages
@@ -345,6 +378,8 @@ def main():
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
+        
+        worker_task = asyncio.create_task(series_worker(app, DB))
 
         stop_event = asyncio.Event()
 
@@ -361,6 +396,12 @@ def main():
 
         logging.info("Бот запущен. Ждём события…")
         await stop_event.wait()
+        
+        worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
 
         logging.info("Останавливаюсь…")
         await app.updater.stop()
