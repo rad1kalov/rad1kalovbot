@@ -209,11 +209,12 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # ───── НОВОЕ: обработка команд серии ─────
     if msg.text and msg.text.startswith("."):
-    if await handle_time_command(update, context, DB):
-        return
-    handled = await handle_series_command(update, context, DB)
-    if handled:
-        return
+        if await handle_time_command(update, context, DB):
+            return
+        handled = await handle_series_command(update, context, DB)
+        if handled:
+            # всё равно сохраним команду в БД для истории
+            return
     # ─────────────────────────────────────────
 
     # ... существующий код ниже без изменений ...
