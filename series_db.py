@@ -2,7 +2,8 @@
 """Работа с таблицами series и series_log."""
 
 import sqlite3
-from datetime import datetime
+
+from timezone import now_iso
 
 
 def init_series_db(conn: sqlite3.Connection) -> None:
@@ -75,7 +76,6 @@ def log_event(conn: sqlite3.Connection, chat_id: int, event: str,
     conn.execute(
         "INSERT INTO series_log (chat_id, event, from_stage, to_stage, by_user, date) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (chat_id, event, from_stage, to_stage, by_user,
-         datetime.now().isoformat(timespec="seconds")),
+        (chat_id, event, from_stage, to_stage, by_user, now_iso()),
     )
     conn.commit()
