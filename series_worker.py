@@ -18,17 +18,17 @@ async def series_worker(app, conn: sqlite3.Connection):
 
     while True:
         try:
-            now = datetime.now()
-            today = now.date().isoformat()
+            current = now()
+            today = today_str()
 
             # Полночные задачи: 00:00–00:04
-            if now.hour == 0 and now.minute < 5 and last_midnight_date != today:
+            if current.hour == 0 and current.minute < 5 and last_midnight_date != today:
                 logging.info("Series worker: полночные задачи")
                 burn_stale_streaks(conn)
                 last_midnight_date = today
 
             # Напоминания: 21:00–21:04
-            if now.hour == 21 and now.minute < 5 and last_reminder_date != today:
+            if current.hour == 21 and current.minute < 5 and last_reminder_date != today:
                 logging.info("Series worker: напоминания 21:00")
                 await send_reminders(app, conn)
                 last_reminder_date = today
