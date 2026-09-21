@@ -2,10 +2,10 @@
 """Логика серии: обновление, сгорание, сводка, воскрешение."""
 
 import sqlite3
-from datetime import date, timedelta
 
 from series_db import ensure_series, get_series, log_event
 from stages import stage_name
+from timezone import today_str as _today, yesterday_str as _yesterday
 
 
 def _today() -> str:
