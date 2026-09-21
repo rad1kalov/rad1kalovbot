@@ -7,15 +7,6 @@ from series_db import ensure_series, get_series, log_event
 from stages import stage_name
 from timezone import today_str as _today, yesterday_str as _yesterday
 
-
-def _today() -> str:
-    return date.today().isoformat()
-
-
-def _yesterday() -> str:
-    return (date.today() - timedelta(days=1)).isoformat()
-
-
 def plural_days(n: int) -> str:
     n = abs(int(n)) % 100
     if 11 <= n <= 19:
