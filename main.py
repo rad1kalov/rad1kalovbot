@@ -398,10 +398,10 @@ def main():
         await stop_event.wait()
         
         worker_task.cancel()
-            try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
 
         logging.info("Останавливаюсь…")
         await app.updater.stop()
