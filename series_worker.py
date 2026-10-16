@@ -1,5 +1,5 @@
 # series_worker.py
-"""Фоновый воркер: полночь + напоминания в 21:00."""
+"""Фоновый воркер: обработка смены суток и вечерние напоминания."""
 
 import asyncio
 import logging
@@ -11,25 +11,30 @@ from timezone import now, today_str
 
 
 async def series_worker(app, conn: sqlite3.Connection):
-    last_midnight_date = None
+    """
+    Фоновый процесс:
+    - При смене дня (в полночь или после рестарта) сжигает пропущенные серии и обновляет лимиты.
+    - В 21:00 аккуратно напоминает об активности тем, у кого включены напоминания и серия под угрозой.
+    """
+    last_midnight_date = today_str()
     last_reminder_date = None
 
-    logging.info("Series worker запущен")
+    logging.info("Series worker успешно запущен")
 
     while True:
         try:
             current = now()
             today = today_str()
 
-            # Полночные задачи: 00:00–00:04
-            if current.hour == 0 and current.minute < 5 and last_midnight_date != today:
-                logging.info("Series worker: полночные задачи")
+            # Смена суток: срабатывает гарантированно при наступлении нового дня
+            if last_midnight_date != today:
+                logging.info("Series worker: смена суток, обработка серий...")
                 burn_stale_streaks(conn)
                 last_midnight_date = today
 
-            # Напоминания: 21:00–21:04
-            if current.hour == 21 and current.minute < 5 and last_reminder_date != today:
-                logging.info("Series worker: напоминания 21:00")
+            # Вечерние напоминания: срабатывают после 21:00 один раз в день
+            if current.hour >= 21 and last_reminder_date != today:
+                logging.info("Series worker: отправка вечерних напоминаний в 21:00...")
                 await send_reminders(app, conn)
                 last_reminder_date = today
 
@@ -43,24 +48,28 @@ async def send_reminders(app, conn: sqlite3.Connection):
     conn.row_factory = sqlite3.Row
     today = today_str()
 
-    rows = conn.execute(
-        "SELECT * FROM series "
-        "WHERE reminders = 1 AND current_streak > 0 "
-        "AND (last_date IS NULL OR last_date != ?)",
-        (today,),
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT * FROM series 
+        WHERE enabled = 1 AND reminders = 1 AND current_streak > 0 
+          AND frozen = 0 AND (last_date IS NULL OR last_date != ?)
+    """, (today,)).fetchall()
 
     for row in rows:
         r = dict(row)
-        if not r["business_connection_id"]:
+        if not r.get("business_connection_id"):
             continue
+
+        streak = r["current_streak"]
+        st_name = stage_name(r["stage"])
+
         text = (
-            "⚠️ *Серия скоро сгорит!*\n"
-            f"🔥 Текущая серия: {r['current_streak']} {plural_days(r['current_streak'])}\n"
-            f"🏆 Рекорд: {r['best_streak']} {plural_days(r['best_streak'])}\n"
-            f"🎭 Стадия: {stage_name(r['stage'])}\n"
-            "⏳ Напишите что-нибудь до полуночи!"
+            "⏳ *Напоминание о серии общения*\n\n"
+            f"🔥 Текущая серия: *{streak} {plural_days(streak)}*\n"
+            f"🎭 Стадия: *{st_name}*\n\n"
+            "До полуночи остаётся немного времени. Отправьте сообщение, чтобы продлить серию, "
+            "или напишите `.freeze`, чтобы сохранить её на сегодня ❄️"
         )
+
         try:
             await app.bot.send_message(
                 chat_id=r["chat_id"],
@@ -68,5 +77,6 @@ async def send_reminders(app, conn: sqlite3.Connection):
                 business_connection_id=r["business_connection_id"],
                 parse_mode="Markdown",
             )
+            logging.info(f"Напоминание отправлено в чат {r['chat_id']}")
         except Exception as e:
             logging.error(f"send_reminders failed for {r['chat_id']}: {e}")

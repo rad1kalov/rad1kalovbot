@@ -319,15 +319,16 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         info = process_message(DB, msg.chat_id, msg.business_connection_id, from_name)
         if info:
             summary = build_summary(DB, msg.chat_id, info)
-            try:
-                await context.bot.send_message(
-                    chat_id=msg.chat_id,
-                    text=summary,
-                    business_connection_id=msg.business_connection_id,
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                logging.error(f"send series summary failed: {e}")
+            if summary:
+                try:
+                    await context.bot.send_message(
+                        chat_id=msg.chat_id,
+                        text=summary,
+                        business_connection_id=msg.business_connection_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logging.error(f"send series summary failed: {e}")
     # ───────────────────────────────────
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
