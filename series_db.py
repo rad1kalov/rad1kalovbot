@@ -55,6 +55,9 @@ def init_series_db(conn: sqlite3.Connection) -> None:
         ("notify_mode", "TEXT DEFAULT 'milestones'"),
         ("auto_stage", "INTEGER DEFAULT 1"),
         ("burned_date", "TEXT"),
+        ("hide_stage", "INTEGER DEFAULT 0"),
+        ("custom_stage", "TEXT"),
+        ("auto_freeze", "INTEGER DEFAULT 0"),
     ]
 
     for col_name, col_def in migrations:

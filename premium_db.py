@@ -165,3 +165,8 @@ def get_all_bio_settings(conn: sqlite3.Connection):
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM bio_settings").fetchall()
     return [dict(r) for r in rows]
+
+
+# Псевдоним для удобства
+add_premium = activate_premium
+

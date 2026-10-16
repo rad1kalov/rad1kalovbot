@@ -213,10 +213,12 @@ def burn_stale_streaks(conn: sqlite3.Connection) -> None:
 
         # Сброс лимитов 1-го числа месяца
         if r.get("month_tracker") != current_month:
+            from admin_db import has_feature_access, OWNER_ID
+            rev_limit, frz_limit = (10, 10) if has_feature_access(conn, OWNER_ID, "extended_limits") else (3, 2)
             conn.execute("""
                 UPDATE series
-                SET revives_left = 3, freezes_left = 2, month_tracker = ?
+                SET revives_left = ?, freezes_left = ?, month_tracker = ?
                 WHERE chat_id = ?
-            """, (current_month, chat_id))
+            """, (rev_limit, frz_limit, current_month, chat_id))
 
     conn.commit()

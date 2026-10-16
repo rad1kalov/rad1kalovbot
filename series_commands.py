@@ -1,5 +1,5 @@
 # series_commands.py
-"""Интерактивное управление серией общения через единую команду .streak с категориями инлайн-кнопок."""
+"""Интерактивное управление серией общения через единую команду .streak с карточками и темами оформления."""
 
 import logging
 import os
@@ -20,6 +20,7 @@ from series_db import (
     set_stage,
     get_all_active_series,
 )
+from series_styles import format_styled_streak_card
 from stages import (
     stage_name,
     stage_info,
@@ -32,6 +33,7 @@ from stages import (
     STAGE_CONFIG,
 )
 from timezone import today_str, now
+from admin_db import has_feature_access
 
 log = logging.getLogger(__name__)
 
@@ -42,44 +44,19 @@ def _is_owner(user_id: int) -> bool:
     return user_id == OWNER_ID
 
 
+def _get_max_limits(conn: sqlite3.Connection, user_id: int) -> Tuple[int, int]:
+    """Возвращает (max_revives, max_freezes) с учётом расширенных лимитов."""
+    if has_feature_access(conn, user_id, "extended_limits"):
+        return 10, 10
+    return 3, 2
+
+
 # ─────────────────────── Генерация экранов и клавиатур ───────────────────────
 
 def build_main_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
     chat_id = s["chat_id"]
-    streak = s.get("current_streak", 0)
-    best = s.get("best_streak", 0)
-    st = s.get("stage", "spark")
-    is_enabled = bool(s.get("enabled", 0))
-
-    if not is_enabled:
-        status_line = "🔴 Выключена (серия не считается)"
-    elif s.get("frozen"):
-        status_line = "❄️ Защищена заморозкой"
-    elif s.get("last_date") == today_str():
-        status_line = "✅ Продлена сегодня"
-    else:
-        status_line = "⏳ Ожидает продления сегодня"
-
-    cur_span, req_span, pct, nxt_key = get_progress(streak, st)
-    bar = render_progress_bar(pct, length=8)
-
-    lines = [
-        f"🔥 *Серия общения: {streak} {plural_days(streak)}*",
-        f"🏆 Личный рекорд: *{best} {plural_days(best)}*",
-        f"🎭 Стадия: *{stage_name(st)}*",
-        "",
-        f"Прогресс: `{bar}` {int(pct)}%",
-    ]
-
-    if nxt_key:
-        cfg = STAGE_CONFIG[nxt_key]
-        remaining = req_span - cur_span
-        lines.append(f"До «{cfg['title']} {cfg['icon']}»: ещё *{remaining} {plural_days(remaining)}*")
-    else:
-        lines.append("👑 Максимальный уровень отношений достигнут!")
-
-    lines.append(f"\nСтатус: *{status_line}*")
-    lines.append("\n_Выберите категорию управления кнопками ниже:_")
+    card = format_styled_streak_card(s)
+    text_content = f"{card}\n\n_Выберите категорию управления кнопками ниже:_"
 
     keyboard = [
         [
@@ -92,15 +69,17 @@ def build_main_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
         ],
     ]
 
-    return "\n".join(lines), InlineKeyboardMarkup(keyboard)
+    return text_content, InlineKeyboardMarkup(keyboard)
 
 
-def build_stats_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
+def build_stats_screen(s: dict, conn: sqlite3.Connection) -> Tuple[str, InlineKeyboardMarkup]:
     chat_id = s["chat_id"]
     today = today_str()
     status_str = "Продлена ✅" if s.get("last_date") == today else "Не продлена ⏳"
     if s.get("frozen"):
         status_str = "Заморожена ❄️"
+
+    max_rev, max_frz = _get_max_limits(conn, OWNER_ID)
 
     lines = [
         "📊 *Подробная статистика серии*",
@@ -111,8 +90,8 @@ def build_stats_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
         f"📅 Всего дней общения: *{s.get('total_days', 0)}*",
         f"📌 Статус сегодня: *{status_str}*",
         "━━━━━━━━━━━━━━━",
-        f"💫 Воскрешений в запасе: *{s.get('revives_left', 0)}/3*",
-        f"❄️ Заморозок в запасе: *{s.get('freezes_left', 0)}/2*",
+        f"💫 Воскрешений в запасе: *{s.get('revives_left', 0)}/{max_rev}*",
+        f"❄️ Заморозок в запасе: *{s.get('freezes_left', 0)}/{max_frz}*",
         f"🔔 Напоминания в 21:00: *{'вкл ✅' if s.get('reminders') else 'выкл ❌'}*",
     ]
 
@@ -135,6 +114,12 @@ def build_stages_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
     cur_span, req_span, pct, nxt_key = get_progress(streak, current_key)
     bar = render_progress_bar(pct, length=10)
 
+    hide_stg = bool(s.get("hide_stage", 0))
+    custom_stg = s.get("custom_stage")
+
+    custom_line = f"\n✨ Кастомная стадия: *{custom_stg}*" if custom_stg else ""
+    hide_line = "\n🙈 Стадия в карточке: *СКРЫТА 🔒*" if hide_stg else ""
+
     lines = [
         f"🎭 *Стадии отношений: {stage_name(current_key)}*",
         f"_{stage_info(current_key)['description']}_\n",
@@ -155,7 +140,10 @@ def build_stages_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
         lines.append(f"{marker}{cfg['title']} {cfg['icon']} ({cfg['min_days']}+ дн.)")
 
     mode_label = "автоматический (по дням)" if s.get("auto_stage", 1) else "ручной"
-    lines.append(f"\nРежим стадии: *{mode_label}*")
+    lines.append(f"\nРежим стадии: *{mode_label}*{custom_line}{hide_line}")
+
+    custom_btn_label = "🔄 Сбросить кастомную" if custom_stg else "✨ Задать кастомную"
+    hide_btn_label = "🙈 Скрыть стадию: ВЫКЛ" if hide_stg else "🙈 Скрыть стадию: ВКЛ"
 
     keyboard = [
         [
@@ -166,35 +154,48 @@ def build_stages_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
             InlineKeyboardButton("🔄 Включить авто-расчёт", callback_data=f"strk:stg_auto:{chat_id}")
         ],
         [
+            InlineKeyboardButton(custom_btn_label, callback_data=f"strk:stg_custom:{chat_id}"),
+            InlineKeyboardButton(hide_btn_label, callback_data=f"strk:tog_hide_stg:{chat_id}"),
+        ],
+        [
             InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"strk:main:{chat_id}")
         ],
     ]
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
 
-def build_protect_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
+def build_protect_screen(s: dict, conn: sqlite3.Connection) -> Tuple[str, InlineKeyboardMarkup]:
     chat_id = s["chat_id"]
     frozen_status = "Активна на сегодня ❄️ (серия в безопасности)" if s.get("frozen") else "Не активна"
     streak = s.get("current_streak", 0)
     pre_burn = s.get("pre_burn_streak", 0)
+    auto_frz = bool(s.get("auto_freeze", 0))
 
     streak_state = f"Активен ({streak} дн.)" if streak > 0 else f"Сгорел (можно восстановить {pre_burn} дн.)" if pre_burn > 0 else "0 дней"
+    max_rev, max_frz = _get_max_limits(conn, OWNER_ID)
 
     lines = [
         "🛡 *Защита и Восстановление серии*",
         "━━━━━━━━━━━━━━━",
         f"❄️ Заморозка на сегодня: *{frozen_status}*",
+        f"⚡️ Автозаморозка в 23:30: *{'ВКЛЮЧЕНА ✅' if auto_frz else 'ВЫКЛЮЧЕНА ❌'}*",
         f"🔥 Состояние стрика: *{streak_state}*",
-        f"💫 Доступно воскрешений: *{s.get('revives_left', 0)}/3*",
-        f"❄️ Доступно заморозок: *{s.get('freezes_left', 0)}/2*",
+        f"💫 Доступно воскрешений: *{s.get('revives_left', 0)}/{max_rev}*",
+        f"❄️ Доступно заморозок: *{s.get('freezes_left', 0)}/{max_frz}*",
         "━━━━━━━━━━━━━━━",
         "• *Заморозка* защищает серию от сгорания, если сегодня нет возможности написать.",
+        "• *Автозаморозка* автоматически спасает стрик в 23:30, если общение не состоялось.",
         "• *Воскрешение* восстанавливает сгоревший стрик в течение 72 часов.",
     ]
+
+    auto_frz_btn = "⚡️ Автозаморозка: ВЫКЛ" if auto_frz else "⚡️ Автозаморозка: ВКЛ"
 
     keyboard = [
         [
             InlineKeyboardButton("❄️ Заморозить на сегодня", callback_data=f"strk:act_frz:{chat_id}"),
+        ],
+        [
+            InlineKeyboardButton(auto_frz_btn, callback_data=f"strk:tog_auto_frz:{chat_id}"),
         ],
         [
             InlineKeyboardButton("✨ Воскресить серию", callback_data=f"strk:act_rev:{chat_id}"),
@@ -250,24 +251,63 @@ def build_settings_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
 
 async def handle_series_command(update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection) -> bool:
     """
-    Единственная входная команда: .streak (или /streak).
-    Отправляет интерактивную карточку со всеми категориями управления.
+    Команда .streak (или /streak) с поддержкой подкоманд:
+    - .streak
+    - .streak custom <текст>
+    - .streak custom reset
     """
     msg = update.business_message or update.message
     if not msg or not msg.text:
         return False
 
-    text = msg.text.strip().lower()
-    # Принимаем только команду streak / серия
-    if text not in (".streak", "/streak", ".серия", "/серия") and not text.startswith((".streak ", "/streak ")):
+    raw = msg.text.strip()
+    lower = raw.lower()
+
+    if not lower.startswith((".streak", "/streak", ".серия", "/серия")):
         return False
 
     chat_id = msg.chat_id
     conn_id = getattr(msg, "business_connection_id", None)
     sender = msg.from_user
+    user_id = sender.id if sender else 0
     user_name = sender.full_name if sender else "Собеседник"
 
     s = ensure_series(conn, chat_id, conn_id, user_name)
+
+    parts = raw.split()
+    # Проверяем подкоманду custom
+    if len(parts) >= 2 and parts[1].lower() in ("custom", "кастом"):
+        if not has_feature_access(conn, user_id, "custom_stage"):
+            await msg.reply_text(
+                "🔒 *Кастомная стадия общения доступна по Премиум подписке!*\n\n"
+                "Оформите подписку через /premium, чтобы задать собственное название стадии серии.",
+                parse_mode="Markdown",
+            )
+            return True
+
+        if len(parts) >= 3:
+            sub = parts[2].lower()
+            if sub in ("reset", "сброс", "удалить", "off"):
+                conn.execute("UPDATE series SET custom_stage = NULL WHERE chat_id = ?", (chat_id,))
+                conn.commit()
+                await msg.reply_text("✅ Кастомная стадия сброшена! Отображается стандартная лестница стадий.")
+                return True
+            else:
+                custom_val = " ".join(parts[2:]).strip()[:40]
+                conn.execute("UPDATE series SET custom_stage = ? WHERE chat_id = ?", (custom_val, chat_id))
+                conn.commit()
+                log_event(conn, chat_id, "custom_stage_set", by_user=user_name)
+                await msg.reply_text(f"✨ *Кастомная стадия установлена:* «*{custom_val}*»!\nОна будет отображаться в вашей карточке серии.", parse_mode="Markdown")
+                return True
+        else:
+            await msg.reply_text(
+                "ℹ️ *Установка кастомной стадии:*\n"
+                "Напишите `.streak custom <название>` (например, `.streak custom 👑 Лучшие друзья`)\n"
+                "Или `.streak custom reset` для сброса.",
+                parse_mode="Markdown",
+            )
+            return True
+
     text_content, keyboard = build_main_screen(s)
 
     try:
@@ -318,7 +358,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     elif action == "stats":
         await query.answer()
-        text_content, keyboard = build_stats_screen(s)
+        text_content, keyboard = build_stats_screen(s, conn)
         await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
@@ -330,7 +370,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     elif action == "protect":
         await query.answer()
-        text_content, keyboard = build_protect_screen(s)
+        text_content, keyboard = build_protect_screen(s, conn)
         await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
@@ -360,6 +400,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
                 "burned": "💀 Серия сгорела",
                 "enabled": "🟢 Серия включена",
                 "disabled": "🔴 Серия отключена",
+                "custom_stage_set": "✨ Задана кастомная стадия",
             }
             for row in rows:
                 r = dict(row)
@@ -393,7 +434,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text="\n".join(lines), reply_markup=keyboard, parse_mode="Markdown")
         return True
 
-    # 3. Действия защиты: Заморозка и Воскрешение
+    # 3. Действия защиты: Заморозка, Автозаморозка, Воскрешение
     elif action == "act_frz":
         if not is_owner:
             await query.answer("🔒 Заморозку серии может использовать только владелец аккаунта.", show_alert=True)
@@ -408,7 +449,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
             return True
 
         if s.get("freezes_left", 0) <= 0:
-            await query.answer("❄️ В этом месяце заморозки закончились (лимит: 2/мес).", show_alert=True)
+            await query.answer("❄️ В этом месяце заморозки закончились.", show_alert=True)
             return True
 
         if s.get("current_streak", 0) <= 0:
@@ -424,7 +465,21 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.answer("❄️ Серия успешно заморожена на сегодня!", show_alert=True)
         s = get_series(conn, chat_id)
-        text_content, keyboard = build_protect_screen(s)
+        text_content, keyboard = build_protect_screen(s, conn)
+        await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
+        return True
+
+    elif action == "tog_auto_frz":
+        if not has_feature_access(conn, user_id, "auto_freeze"):
+            await query.answer("🔒 Автозаморозка доступна по Премиум подписке!", show_alert=True)
+            return True
+
+        new_auto = 0 if s.get("auto_freeze", 0) else 1
+        conn.execute("UPDATE series SET auto_freeze = ? WHERE chat_id = ?", (new_auto, chat_id))
+        conn.commit()
+        await query.answer(f"Автозаморозка в 23:30 {'включена ✅' if new_auto else 'выключена ❌'}")
+        s = get_series(conn, chat_id)
+        text_content, keyboard = build_protect_screen(s, conn)
         await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
@@ -443,7 +498,7 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
             return True
 
         if s.get("revives_left", 0) <= 0:
-            await query.answer("💫 Лимит воскрешений исчерпан (3 в месяц).", show_alert=True)
+            await query.answer("💫 Лимит воскрешений исчерпан.", show_alert=True)
             return True
 
         burned_date = s.get("burned_date")
@@ -473,11 +528,44 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         await query.answer(f"✨ Серия успешно воскрешена ({restored} дн.)!", show_alert=True)
         s = get_series(conn, chat_id)
-        text_content, keyboard = build_protect_screen(s)
+        text_content, keyboard = build_protect_screen(s, conn)
         await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
     # 4. Действия со стадиями
+    elif action == "stg_custom":
+        if not has_feature_access(conn, user_id, "custom_stage"):
+            await query.answer("🔒 Кастомная стадия доступна по Премиум подписке!", show_alert=True)
+            return True
+
+        if s.get("custom_stage"):
+            conn.execute("UPDATE series SET custom_stage = NULL WHERE chat_id = ?", (chat_id,))
+            conn.commit()
+            await query.answer("🔄 Кастомная стадия сброшена к стандартной.")
+        else:
+            await query.answer(
+                "✨ Чтобы задать кастомную стадию, отправьте в чат:\n.streak custom <название>\n(например, .streak custom 👑 Лучшие друзья)",
+                show_alert=True,
+            )
+        s = get_series(conn, chat_id)
+        text_content, keyboard = build_stages_screen(s)
+        await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
+        return True
+
+    elif action == "tog_hide_stg":
+        if not has_feature_access(conn, user_id, "hide_stage"):
+            await query.answer("🔒 Скрытие стадии доступно по Премиум подписке!", show_alert=True)
+            return True
+
+        new_hide = 0 if s.get("hide_stage", 0) else 1
+        conn.execute("UPDATE series SET hide_stage = ? WHERE chat_id = ?", (new_hide, chat_id))
+        conn.commit()
+        await query.answer(f"Скрытие стадии: {'ВКЛЮЧЕНО 🔒' if new_hide else 'ВЫКЛЮЧЕНО'}")
+        s = get_series(conn, chat_id)
+        text_content, keyboard = build_stages_screen(s)
+        await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
+        return True
+
     elif action == "stg_up":
         if not is_owner:
             await query.answer("🔒 Менять стадию вручную может только владелец.", show_alert=True)

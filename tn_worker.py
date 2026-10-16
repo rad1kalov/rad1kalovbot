@@ -1,5 +1,5 @@
 # tn_worker.py
-"""Воркер динамического времени в профиле: обновляет last_name каждую минуту."""
+"""Воркер динамического времени, погоды и ночного статуса в профиле."""
 
 import asyncio
 import logging
@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import tn_db
+from weather_service import get_city_weather
 
 log = logging.getLogger(__name__)
 
@@ -18,9 +19,7 @@ async def set_business_account_name(
     first_name: str,
     last_name: Optional[str] = None,
 ) -> bool:
-    """
-    Вызывает метод Telegram Bot API setBusinessAccountName через do_api_request.
-    """
+    """Вызывает метод Telegram Bot API setBusinessAccountName через do_api_request."""
     try:
         return await bot.do_api_request(
             "setBusinessAccountName",
@@ -37,36 +36,53 @@ async def set_business_account_name(
 
 async def name_worker(app, conn: sqlite3.Connection, interval_seconds: int = 60):
     """
-    Каждую минуту обновляет last_name бизнес-аккаунта
-    на текущее локальное время в формате [HH:MM].
+    Каждую минуту обновляет last_name бизнес-аккаунта:
+    - При активном ночном статусе с 23:00 до 08:00: [🌙 Сплю]
+    - С погодой (Premium): [HH:MM +18° ⛅️]
+    - Стандартно: [HH:MM]
     """
-    log.info("Воркер динамического времени (каждую минуту) запущен")
+    log.info("Воркер динамического времени, погоды и ночного статуса запущен")
 
     while True:
         try:
             connections = tn_db.get_all_connections(conn)
             for c in connections:
                 bc_id = c["business_connection_id"]
-                offset = c["tz_offset"] if c["tz_offset"] is not None else 3
-                first_name = c["first_name"]
+                offset = c["tz_offset"] if c.get("tz_offset") is not None else 3
+                first_name = c.get("first_name")
 
-                if not first_name:
+                if not first_name or not bc_id:
                     continue
 
                 tz = timezone(timedelta(hours=offset))
-                time_str = datetime.now(tz).strftime("[%H:%M]")
+                now_local = datetime.now(tz)
+                hour = now_local.hour
+                time_str = now_local.strftime("%H:%M")
+
+                # 1. Проверяем ночной статус (23:00 - 08:00)
+                if c.get("night_status_enabled") and (hour >= 23 or hour < 8):
+                    target_last_name = "[🌙 Сплю]"
+                else:
+                    # 2. Проверяем погоду в имени
+                    weather_text = ""
+                    if c.get("weather_enabled") and c.get("weather_city"):
+                        w_res = await get_city_weather(c["weather_city"])
+                        if w_res:
+                            weather_text = f" {w_res}"
+
+                    target_last_name = f"[{time_str}{weather_text}]"
 
                 await set_business_account_name(
                     app.bot,
                     business_connection_id=bc_id,
                     first_name=first_name,
-                    last_name=time_str,
+                    last_name=target_last_name,
                 )
 
         except Exception as e:
             log.error("name_worker ошибка: %s", e)
 
-        # Выравниваем сон ровно до начала следующей минуты
+        # Выравниваем сон до начала следующей минуты
         now_sec = datetime.now().second
         sleep_time = max(1, interval_seconds - now_sec)
         await asyncio.sleep(sleep_time)
