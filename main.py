@@ -10,6 +10,8 @@ from telegram import Update
 from telegram.ext import (
     Application,
     BusinessMessagesDeletedHandler,
+    CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
@@ -23,6 +25,8 @@ from series_worker import series_worker
 from tn_commands import handle_time_command
 from tn_worker import name_worker
 from tn_db import init_settings_table
+
+from start_commands import start_command, help_command, instruction_callback
 
 load_dotenv()
 
@@ -373,6 +377,13 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─────────────────────────── ЗАПУСК ─────────────────────────────────
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
+
+    # Команды бота (в личных сообщениях)
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(
+        CallbackQueryHandler(instruction_callback, pattern="^(instruction|start_back)$")
+    )
 
     # Новые бизнес-сообщения (включая ответы)
     app.add_handler(
