@@ -9,6 +9,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 import tn_db
+from tn_worker import set_business_account_name
 
 log = logging.getLogger(__name__)
 
@@ -158,14 +159,12 @@ async def handle_time_callback(
             if first_name:
                 tz = timezone(timedelta(hours=offset))
                 time_str = datetime.now(tz).strftime("[%H:%M]")
-                try:
-                    await context.bot.set_business_account_name(
-                        business_connection_id=bc_id,
-                        first_name=first_name,
-                        last_name=time_str,
-                    )
-                except Exception as e:
-                    log.error(f"immediate name update failed: {e}")
+                await set_business_account_name(
+                    context.bot,
+                    business_connection_id=bc_id,
+                    first_name=first_name,
+                    last_name=time_str,
+                )
 
         await query.answer(f"✅ Часовой пояс установлен: UTC{offset:+d}")
 
@@ -192,14 +191,12 @@ async def handle_time_callback(
             if first_name:
                 tz = timezone(timedelta(hours=cur_offset))
                 time_str = datetime.now(tz).strftime("[%H:%M]")
-                try:
-                    await context.bot.set_business_account_name(
-                        business_connection_id=bc_id,
-                        first_name=first_name,
-                        last_name=time_str,
-                    )
-                except Exception as e:
-                    log.error(f"refresh name update failed: {e}")
+                await set_business_account_name(
+                    context.bot,
+                    business_connection_id=bc_id,
+                    first_name=first_name,
+                    last_name=time_str,
+                )
 
         await query.answer("🔄 Время в профиле обновлено!")
         try:
