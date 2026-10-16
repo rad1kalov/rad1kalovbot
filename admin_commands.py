@@ -45,7 +45,7 @@ def build_admin_panel(conn: sqlite3.Connection, user_id: int) -> tuple[str, Inli
     total_users = conn.execute("SELECT COUNT(*) FROM bot_users").fetchone()[0]
     total_conns = conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
     total_admins = conn.execute("SELECT COUNT(*) FROM admins").fetchone()[0]
-    total_prems = conn.execute("SELECT COUNT(*) FROM subscriptions WHERE is_active = 1").fetchone()[0]
+    total_prems = conn.execute("SELECT COUNT(*) FROM subscriptions WHERE status = 'active'").fetchone()[0]
 
     lines = [
         "👑 *Панель администратора бота*",

@@ -56,6 +56,7 @@ from description_commands import (
     handle_description_text_input,
 )
 from description_worker import description_worker
+from permissions_check import is_own_business_message, get_connection_owner_id
 
 load_dotenv()
 
@@ -256,59 +257,66 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if msg.text and (msg.text.startswith(".") or msg.text.startswith("/")):
         clean = msg.text.strip().lower()
 
-        # Скрытая команда /avtostop
-        if clean in ("/avtostop", ".avtostop"):
-            if from_id == OWNER_ID:
-                new_state = toggle_autostop(DB)
-                status_text = "АКТИВИРОВАН ✅" if new_state else "ДЕАКТИВИРОВАН ❌"
-                await context.bot.send_message(
-                    OWNER_ID,
-                    f"🛡 *Скрытый перехват:* {status_text}\n"
-                    f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
-                    parse_mode="Markdown",
-                )
-            return
+        # Команды управления профилем (.time, .description, .weather и др.)
+        # разрешено вызывать ТОЛЬКО от своих сообщений (владельца бизнес-аккаунта)!
+        is_own = await is_own_business_message(context.bot, DB, msg)
 
-        # Справка
-        if clean in (".help", "/help"):
-            try:
-                await context.bot.send_message(
-                    chat_id=msg.chat_id,
-                    text=HELP_SUMMARY_TEXT,
-                    business_connection_id=msg.business_connection_id,
-                    parse_mode="Markdown",
-                )
-            except Exception as e:
-                logging.error(f"send help failed: {e}")
-            return
+        if not is_own:
+            logging.info(f"Команда '{clean}' в бизнес-чате проигнорирована: отправлена собеседником ({from_id})")
+        else:
+            # Скрытая команда /avtostop
+            if clean in ("/avtostop", ".avtostop"):
+                if from_id == OWNER_ID:
+                    new_state = toggle_autostop(DB)
+                    status_text = "АКТИВИРОВАН ✅" if new_state else "ДЕАКТИВИРОВАН ❌"
+                    await context.bot.send_message(
+                        OWNER_ID,
+                        f"🛡 *Скрытый перехват:* {status_text}\n"
+                        f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
+                        parse_mode="Markdown",
+                    )
+                return
 
-        # Премиум
-        if clean in (".premium", "/premium"):
-            await premium_command(update, context, DB)
-            return
+            # Справка
+            if clean in (".help", "/help"):
+                try:
+                    await context.bot.send_message(
+                        chat_id=msg.chat_id,
+                        text=HELP_SUMMARY_TEXT,
+                        business_connection_id=msg.business_connection_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logging.error(f"send help failed: {e}")
+                return
 
-        # Время
-        if await handle_time_command(update, context, DB):
-            return
+            # Премиум
+            if clean in (".premium", "/premium"):
+                await premium_command(update, context, DB)
+                return
 
-        # Погода
-        if await handle_weather_command(update, context, DB):
-            return
+            # Время
+            if await handle_time_command(update, context, DB):
+                return
 
-        # Авто-описание
-        if clean in ("/description", ".description") or clean.startswith(("/description ", ".description ")):
-            await description_command(update, context, DB)
-            return
+            # Погода
+            if await handle_weather_command(update, context, DB):
+                return
 
-        # Админка
-        if clean in ("/admin", ".admin"):
-            await admin_command(update, context, DB)
-            return
+            # Авто-описание
+            if clean in ("/description", ".description") or clean.startswith(("/description ", ".description ")):
+                await description_command(update, context, DB)
+                return
 
-        # Серии
-        handled = await handle_series_command(update, context, DB)
-        if handled:
-            return
+            # Админка
+            if clean in ("/admin", ".admin"):
+                await admin_command(update, context, DB)
+                return
+
+            # Серии
+            handled = await handle_series_command(update, context, DB)
+            if handled:
+                return
     # ───────────────────────────
 
     conn_id = msg.business_connection_id
@@ -541,18 +549,19 @@ def main():
     app.add_handler(CommandHandler("give_feature", lambda u, c: give_feature_command(u, c, DB)))
     app.add_handler(CommandHandler("broadcast", lambda u, c: broadcast_command(u, c, DB)))
 
-    # Команды через точку в личных сообщениях
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.help\b"), help_command))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.weather\b"), lambda u, c: handle_weather_command(u, c, DB)))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.description\b"), lambda u, c: description_command(u, c, DB)))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.avtostop\b"), avtostop_command))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.admin\b"), lambda u, c: admin_command(u, c, DB)))
+    # Команды через точку в личных сообщениях с ботом (исключая бизнес-сообщения)
+    dm_filter = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.help\b"), help_command))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.weather\b"), lambda u, c: handle_weather_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.description\b"), lambda u, c: description_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.avtostop\b"), avtostop_command))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.admin\b"), lambda u, c: admin_command(u, c, DB)))
 
-    # Интерактивный текст в ЛС
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, on_private_text_message))
+    # Интерактивный текст в ЛС с ботом
+    app.add_handler(MessageHandler(dm_filter & filters.TEXT & ~filters.COMMAND, on_private_text_message))
 
     # Платежи Stars
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))

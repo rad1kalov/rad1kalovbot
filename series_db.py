@@ -140,3 +140,16 @@ def get_all_active_series(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
         "SELECT * FROM series WHERE enabled = 1 ORDER BY current_streak DESC LIMIT 20"
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_series_owner_id(conn: sqlite3.Connection, s: dict) -> int:
+    """Возвращает Telegram user_id владельца подключения для указанной серии."""
+    bc_id = s.get("business_connection_id")
+    if bc_id:
+        row = conn.execute("SELECT user_id FROM settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+        if row and row[0]:
+            return row[0]
+        row2 = conn.execute("SELECT user_id FROM bio_settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+        if row2 and row2[0]:
+            return row2[0]
+    return 0

@@ -49,6 +49,18 @@ async def apply_bio_for_connection(bot, conn: sqlite3.Connection, bc_id: str, us
         # Пробуем найти через активные подключения
         return
 
+    # Если у пользователя активно авто-описание или парное био, ротацией управляет description_worker
+    has_auto = conn.execute(
+        "SELECT 1 FROM auto_descriptions WHERE user_id = ? AND is_active = 1",
+        (uid,)
+    ).fetchone()
+    has_pair = conn.execute(
+        "SELECT 1 FROM pair_bios WHERE (user_1 = ? OR user_2 = ?) AND status = 'active'",
+        (uid, uid)
+    ).fetchone()
+    if has_auto or has_pair:
+        return
+
     has_prem = is_premium(conn, uid)
     original_bio = settings.get("original_bio", "") if settings else ""
     current_bio = settings.get("current_bio", "") if settings else ""
@@ -94,8 +106,13 @@ async def on_business_connection_update(update, context, conn: sqlite3.Connectio
     user_id = bc.user.id
     first_name = bc.user.first_name or ""
 
-    # Сохраняем подключение в tn_db
-    tn_db.save_first_name(conn, bc_id, first_name)
+    if not getattr(bc, "is_enabled", False):
+        tn_db.set_connection_inactive(conn, bc_id)
+        log.info(f"Бизнес-подключение {bc_id} отключено пользователем {user_id}")
+        return
+
+    # Сохраняем подключение в tn_db как активное
+    tn_db.save_first_name(conn, bc_id, first_name, user_id=user_id)
 
     # Пробуем получить текущее описание профиля пользователя
     existing_bio = ""
@@ -123,9 +140,11 @@ async def bio_worker(app, conn: sqlite3.Connection, interval_seconds: int = 300)
         try:
             connections = tn_db.get_all_connections(conn)
             for c in connections:
+                if c.get("is_active") == 0:
+                    continue
                 bc_id = c["business_connection_id"]
                 b_settings = get_bio_settings(conn, bc_id)
-                uid = b_settings.get("user_id") if b_settings else None
+                uid = b_settings.get("user_id") if b_settings else c.get("user_id")
 
                 if bc_id:
                     await apply_bio_for_connection(app.bot, conn, bc_id, uid)

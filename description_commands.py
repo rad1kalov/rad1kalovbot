@@ -10,7 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 import tn_db
-from permissions_check import check_name_and_bio_permissions, RULE_999_NOTICE
+from permissions_check import check_name_and_bio_permissions, RULE_999_NOTICE, is_own_business_message, get_connection_owner_id
 from admin_db import (
     has_feature_access,
     resolve_user_id,
@@ -25,15 +25,7 @@ log = logging.getLogger(__name__)
 
 
 def _get_user_bc_id(conn: sqlite3.Connection, user_id: int) -> Optional[str]:
-    conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT business_connection_id FROM settings WHERE user_id = ?", (user_id,)).fetchone()
-    if row and row["business_connection_id"]:
-        return row["business_connection_id"]
-    row2 = conn.execute("SELECT business_connection_id FROM bio_settings WHERE user_id = ?", (user_id,)).fetchone()
-    if row2 and row2["business_connection_id"]:
-        return row2["business_connection_id"]
-    conns = tn_db.get_all_connections(conn)
-    return conns[0]["business_connection_id"] if conns else None
+    return tn_db.get_user_bc_id(conn, user_id)
 
 
 def format_bio_with_watermark(bio_line: str, is_prem: bool) -> str:
@@ -129,6 +121,12 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not msg:
         return False
 
+    # Если команда отправлена в бизнес-чате, разрешаем её ТОЛЬКО владельцу аккаунта
+    if getattr(msg, "business_connection_id", None):
+        is_own = await is_own_business_message(context.bot, conn, msg)
+        if not is_own:
+            return False
+
     sender = msg.from_user
     user_id = sender.id if sender else 0
     username = sender.username if sender else None
@@ -136,7 +134,8 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     record_bot_user(conn, user_id, username, first_name)
 
-    bc_id = getattr(msg, "business_connection_id", None) or _get_user_bc_id(conn, user_id)
+    conn_id = getattr(msg, "business_connection_id", None)
+    bc_id = conn_id or _get_user_bc_id(conn, user_id)
 
     # ───── ПРАВИЛО 999 ─────
     ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
@@ -145,7 +144,7 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_message(
                 chat_id=msg.chat_id,
                 text=err_msg,
-                business_connection_id=bc_id,
+                business_connection_id=getattr(msg, "business_connection_id", None),
                 parse_mode="Markdown",
             )
         except Exception:
@@ -153,14 +152,15 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return True
     # ────────────────────────
 
-    text_content, keyboard = build_description_menu(conn, user_id)
+    owner_id = (await get_connection_owner_id(context.bot, conn, bc_id)) or user_id
+    text_content, keyboard = build_description_menu(conn, owner_id)
 
     try:
         await context.bot.send_message(
             chat_id=msg.chat_id,
             text=text_content,
             reply_markup=keyboard,
-            business_connection_id=bc_id,
+            business_connection_id=getattr(msg, "business_connection_id", None),
             parse_mode="Markdown",
         )
     except Exception as e:
@@ -183,6 +183,13 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
     record_bot_user(conn, user_id, username, first_name)
 
     bc_id = getattr(query.message, "business_connection_id", None) or _get_user_bc_id(conn, user_id)
+
+    if bc_id:
+        owner_id = await get_connection_owner_id(context.bot, conn, bc_id)
+        if owner_id and user_id != owner_id:
+            await query.answer("🔒 Настройки описания может изменять только владелец аккаунта!", show_alert=True)
+            return True
+
     data = query.data
 
     # 1. Настройка одиночного авто-описания

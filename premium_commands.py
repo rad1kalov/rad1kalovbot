@@ -215,10 +215,9 @@ async def successful_payment_handler(update: Update, context: ContextTypes.DEFAU
     activate_premium(conn, user_id, plan=plan, days=days, charge_id=charge_id)
 
     # Немедленно снимаем водяной знак со всех подключений этого пользователя
-    conns = tn_db.get_all_connections(conn)
-    for c in conns:
-        bc_id = c["business_connection_id"]
-        await apply_bio_for_connection(context.bot, conn, bc_id, user_id)
+    user_conns = conn.execute("SELECT business_connection_id FROM settings WHERE user_id = ?", (user_id,)).fetchall()
+    for row in user_conns:
+        await apply_bio_for_connection(context.bot, conn, row[0], user_id)
 
     tier_info = TARIFFS.get(plan, TARIFFS["1m"])
     await msg.reply_text(
@@ -262,10 +261,10 @@ async def give_premium_admin_command(update: Update, context: ContextTypes.DEFAU
 
     activate_premium(conn, target_uid, plan=plan, days=days)
 
-    # Снимаем водяной знак
-    conns = tn_db.get_all_connections(conn)
-    for c in conns:
-        await apply_bio_for_connection(context.bot, conn, c["business_connection_id"], target_uid)
+    # Снимаем водяной знак с подключений указанного пользователя
+    user_conns = conn.execute("SELECT business_connection_id FROM settings WHERE user_id = ?", (target_uid,)).fetchall()
+    for row in user_conns:
+        await apply_bio_for_connection(context.bot, conn, row[0], target_uid)
 
     await update.effective_message.reply_text(
         f"✅ Пользователю `{target_uid}` успешно выдан Premium ({days or 'навсегда'} дн.)!",

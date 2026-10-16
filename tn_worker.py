@@ -47,6 +47,10 @@ async def name_worker(app, conn: sqlite3.Connection, interval_seconds: int = 60)
         try:
             connections = tn_db.get_all_connections(conn)
             for c in connections:
+                # Обновляем профиль ТОЛЬКО если пользователь сам включил время и подключение активно
+                if not c.get("time_enabled") or c.get("is_active") == 0:
+                    continue
+
                 bc_id = c["business_connection_id"]
                 offset = c["tz_offset"] if c.get("tz_offset") is not None else 3
                 first_name = c.get("first_name")

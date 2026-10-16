@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 
 import tn_db
 from tn_worker import set_business_account_name
-from permissions_check import check_name_and_bio_permissions
+from permissions_check import check_name_and_bio_permissions, is_own_business_message, get_connection_owner_id
 from admin_db import has_feature_access
 from weather_service import get_city_weather
 
@@ -38,8 +38,15 @@ def get_current_offset(conn: sqlite3.Connection, bc_id: str) -> int:
 def build_timezone_keyboard(conn: sqlite3.Connection, bc_id: str, user_id: int) -> InlineKeyboardMarkup:
     s = tn_db.get_setting(conn, bc_id) or {}
     selected_offset = s.get("tz_offset", 3)
+    time_on = bool(s.get("time_enabled", 0))
 
     keyboard = []
+
+    # Кнопка включения/выключения времени в профиле
+    time_btn = f"⏱ Время в имени: {'ВКЛ ✅' if time_on else 'ВЫКЛ ❌'}"
+    keyboard.append([
+        InlineKeyboardButton(time_btn, callback_data="tz:tog_time")
+    ])
 
     # Закреплённое Московское время в самом верху
     moscow_label = "⭐️ Москва (UTC+3)" + (" ✅" if selected_offset == 3 else "")
@@ -89,11 +96,14 @@ def get_time_text(conn: sqlite3.Connection, bc_id: str) -> str:
     tz = timezone(timedelta(hours=offset))
     cur_time = datetime.now(tz).strftime("%H:%M")
 
+    time_on = bool(s.get("time_enabled", 0))
     w_city = s.get("weather_city")
     w_on = bool(s.get("weather_enabled", 0))
     n_on = bool(s.get("night_status_enabled", 0))
 
-    extra_lines = []
+    extra_lines = [
+        f"• ⏱ Время в имени: {'активно [ЧЧ:ММ] ✅' if time_on else 'отключено ❌'}"
+    ]
     if w_on and w_city:
         extra_lines.append(f"• 🌦 Погода: `{w_city}` (активна в имени)")
     elif w_city:
@@ -107,7 +117,7 @@ def get_time_text(conn: sqlite3.Connection, bc_id: str) -> str:
     return (
         "🕒 *Настройка времени и статуса в профиле*\n\n"
         f"Текущее установленное время: *[{cur_time}]* (UTC{offset:+d}){extra_info}\n\n"
-        "Фамилия вашего бизнес-аккаунта обновляется каждую минуту: `[ЧЧ:ММ]`.\n"
+        "Фамилия вашего бизнес-аккаунта обновляется каждую минуту при включенном режиме.\n"
         "💡 _Для установки города погоды отправьте: `.weather <город>`_\n\n"
         "Выберите ваш часовой пояс и настройки кнопками ниже 👇"
     )
@@ -125,14 +135,22 @@ async def handle_time_command(
     if text != ".time" and not text.startswith(".time "):
         return False
 
+    # Если команда отправлена в бизнес-чате, разрешаем её ТОЛЬКО владельцу аккаунта
+    if getattr(msg, "business_connection_id", None):
+        is_own = await is_own_business_message(context.bot, conn, msg)
+        if not is_own:
+            return False
+
+    user_id = msg.from_user.id if msg.from_user else 0
     bc_id = getattr(msg, "business_connection_id", None)
     if not bc_id:
-        all_conns = tn_db.get_all_connections(conn)
-        if all_conns:
-            bc_id = all_conns[0]["business_connection_id"]
-        else:
+        bc_id = tn_db.get_user_bc_id(conn, user_id)
+        if not bc_id:
             await msg.reply_text(
-                "⚠️ Команда доступна в бизнес-чате или после подключения бота к Telegram Business."
+                "⚠️ *У вас не подключен Telegram Business!*\n\n"
+                "Для настройки времени подключите бота:\n"
+                "*Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
+                parse_mode="Markdown",
             )
             return True
 
@@ -143,7 +161,7 @@ async def handle_time_command(
             await context.bot.send_message(
                 chat_id=msg.chat_id,
                 text=err_msg,
-                business_connection_id=bc_id,
+                business_connection_id=getattr(msg, "business_connection_id", None),
                 parse_mode="Markdown",
             )
         except Exception:
@@ -151,11 +169,14 @@ async def handle_time_command(
         return True
     # ────────────────────────
 
-    user_id = msg.from_user.id if msg.from_user else 0
-    if msg.from_user and isinstance(getattr(msg.from_user, "first_name", None), str):
-        tn_db.save_first_name(conn, bc_id, msg.from_user.first_name, user_id=user_id)
+    owner_id = (await get_connection_owner_id(context.bot, conn, bc_id)) or user_id
+    # Включаем время для этого подключения
+    tn_db.set_time_enabled(conn, bc_id, True)
 
-    keyboard = build_timezone_keyboard(conn, bc_id, user_id)
+    if msg.from_user and isinstance(getattr(msg.from_user, "first_name", None), str):
+        tn_db.save_first_name(conn, bc_id, msg.from_user.first_name, user_id=owner_id)
+
+    keyboard = build_timezone_keyboard(conn, bc_id, owner_id)
     text_content = get_time_text(conn, bc_id)
 
     try:
@@ -163,7 +184,7 @@ async def handle_time_command(
             chat_id=msg.chat_id,
             text=text_content,
             reply_markup=keyboard,
-            business_connection_id=bc_id,
+            business_connection_id=getattr(msg, "business_connection_id", None),
             parse_mode="Markdown",
         )
     except Exception as e:
@@ -186,6 +207,12 @@ async def handle_weather_command(
     if cmd not in (".weather", "/weather", ".погода", "/погода"):
         return False
 
+    # Если команда отправлена в бизнес-чате, разрешаем её ТОЛЬКО владельцу аккаунта
+    if getattr(msg, "business_connection_id", None):
+        is_own = await is_own_business_message(context.bot, conn, msg)
+        if not is_own:
+            return False
+
     user_id = msg.from_user.id if msg.from_user else 0
     if not has_feature_access(conn, user_id, "weather_name"):
         await msg.reply_text(
@@ -205,12 +232,17 @@ async def handle_weather_command(
     city = parts[1].strip()
     bc_id = getattr(msg, "business_connection_id", None)
     if not bc_id:
-        all_conns = tn_db.get_all_connections(conn)
-        if all_conns:
-            bc_id = all_conns[0]["business_connection_id"]
+        bc_id = tn_db.get_user_bc_id(conn, user_id)
+        if not bc_id:
+            await msg.reply_text(
+                "⚠️ *У вас не подключен Telegram Business!*\n\n"
+                "Подключите бота в *Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
+                parse_mode="Markdown",
+            )
+            return True
 
-    if bc_id:
-        tn_db.set_weather_settings(conn, bc_id, city=city, enabled=True)
+    owner_id = (await get_connection_owner_id(context.bot, conn, bc_id)) or user_id
+    tn_db.set_weather_settings(conn, bc_id, city=city, enabled=True, user_id=owner_id)
 
     # Пробуем запросить погоду для проверки
     weather_sample = await get_city_weather(city)
@@ -232,29 +264,80 @@ async def handle_time_callback(
     if not query or not query.data or not query.data.startswith("tz:"):
         return False
 
-    bc_id = getattr(query.message, "business_connection_id", None)
-    if not bc_id:
-        all_conns = tn_db.get_all_connections(conn)
-        if all_conns:
-            bc_id = all_conns[0]["business_connection_id"]
-
     user_id = query.from_user.id if query.from_user else 0
+    bc_id = getattr(query.message, "business_connection_id", None) or tn_db.get_user_bc_id(conn, user_id)
+    if not bc_id:
+        await query.answer("⚠️ Ваше подключение Telegram Business не найдено.", show_alert=True)
+        return True
 
-    if query.data.startswith("tz:set:"):
+    owner_id = await get_connection_owner_id(context.bot, conn, bc_id)
+    if owner_id and user_id != owner_id:
+        await query.answer("🔒 Настройки профиля может изменять только владелец аккаунта!", show_alert=True)
+        return True
+
+    target_uid = owner_id or user_id
+
+    if query.data == "tz:tog_time":
+        s = tn_db.get_setting(conn, bc_id) or {}
+        new_state = not bool(s.get("time_enabled", 0))
+        tn_db.set_time_enabled(conn, bc_id, new_state)
+
+        first_name = s.get("first_name") or ""
+        if not new_state:
+            # Отключили время: очищаем фамилию в профиле
+            if first_name:
+                await set_business_account_name(
+                    context.bot,
+                    business_connection_id=bc_id,
+                    first_name=first_name,
+                    last_name="",
+                )
+            await query.answer("⏱ Время в имени: ВЫКЛЮЧЕНО ❌")
+        else:
+            # Включили время: мгновенно ставим текущее время
+            offset = s.get("tz_offset", 3)
+            tz = timezone(timedelta(hours=offset))
+            now_dt = datetime.now(tz)
+            time_str = now_dt.strftime("%H:%M")
+            weather_text = ""
+            if s.get("weather_enabled") and s.get("weather_city"):
+                w_res = await get_city_weather(s["weather_city"])
+                if w_res:
+                    weather_text = f" {w_res}"
+            last_name = f"[{time_str}{weather_text}]"
+            if first_name:
+                await set_business_account_name(
+                    context.bot,
+                    business_connection_id=bc_id,
+                    first_name=first_name,
+                    last_name=last_name,
+                )
+            await query.answer("⏱ Время в имени: ВКЛЮЧЕНО ✅")
+
+        try:
+            await query.edit_message_text(
+                text=get_time_text(conn, bc_id),
+                reply_markup=build_timezone_keyboard(conn, bc_id, target_uid),
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        return True
+
+    elif query.data.startswith("tz:set:"):
         try:
             offset = int(query.data.split(":")[-1])
         except ValueError:
             offset = 3
 
-        if bc_id:
-            tn_db.set_tz_offset(conn, bc_id, offset)
+        tn_db.set_tz_offset(conn, bc_id, offset)
 
         await query.answer(f"✅ Часовой пояс установлен: UTC{offset:+d}")
         if bc_id:
             try:
                 await query.edit_message_text(
                     text=get_time_text(conn, bc_id),
-                    reply_markup=build_timezone_keyboard(conn, bc_id, user_id),
+                    reply_markup=build_timezone_keyboard(conn, bc_id, target_uid),
                     parse_mode="Markdown",
                 )
             except Exception:
@@ -262,12 +345,8 @@ async def handle_time_callback(
         return True
 
     elif query.data == "tz:tog_weather":
-        if not has_feature_access(conn, user_id, "weather_name"):
+        if not has_feature_access(conn, target_uid, "weather_name"):
             await query.answer("🔒 Погода в имени доступна по Премиум подписке!", show_alert=True)
-            return True
-
-        if not bc_id:
-            await query.answer("Подключение не найдено.")
             return True
 
         s = tn_db.get_setting(conn, bc_id) or {}
@@ -276,12 +355,12 @@ async def handle_time_callback(
             await query.answer("📍 Сначала укажите город командой .weather <город>!", show_alert=True)
             return True
 
-        tn_db.set_weather_settings(conn, bc_id, city=None, enabled=new_state)
+        tn_db.set_weather_settings(conn, bc_id, city=None, enabled=new_state, user_id=target_uid)
         await query.answer(f"Погода в имени: {'ВКЛ ✅' if new_state else 'ВЫКЛ ❌'}")
         try:
             await query.edit_message_text(
                 text=get_time_text(conn, bc_id),
-                reply_markup=build_timezone_keyboard(conn, bc_id, user_id),
+                reply_markup=build_timezone_keyboard(conn, bc_id, target_uid),
                 parse_mode="Markdown",
             )
         except Exception:
@@ -289,12 +368,8 @@ async def handle_time_callback(
         return True
 
     elif query.data == "tz:tog_night":
-        if not has_feature_access(conn, user_id, "night_status"):
+        if not has_feature_access(conn, target_uid, "night_status"):
             await query.answer("🔒 Ночной статус доступен по Премиум подписке!", show_alert=True)
-            return True
-
-        if not bc_id:
-            await query.answer("Подключение не найдено.")
             return True
 
         s = tn_db.get_setting(conn, bc_id) or {}
@@ -304,7 +379,7 @@ async def handle_time_callback(
         try:
             await query.edit_message_text(
                 text=get_time_text(conn, bc_id),
-                reply_markup=build_timezone_keyboard(conn, bc_id, user_id),
+                reply_markup=build_timezone_keyboard(conn, bc_id, target_uid),
                 parse_mode="Markdown",
             )
         except Exception:
@@ -342,7 +417,7 @@ async def handle_time_callback(
             try:
                 await query.edit_message_text(
                     text=get_time_text(conn, bc_id),
-                    reply_markup=build_timezone_keyboard(conn, bc_id, user_id),
+                    reply_markup=build_timezone_keyboard(conn, bc_id, target_uid),
                     parse_mode="Markdown",
                 )
             except Exception:

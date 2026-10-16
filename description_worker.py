@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime, timezone as _tz
 from typing import Optional
 
+import tn_db
 from bio_worker import set_business_account_bio
 from description_commands import format_bio_with_watermark
 from premium_db import is_premium
@@ -34,7 +35,7 @@ async def rotate_single_descriptions(app, conn: sqlite3.Connection):
 
     for r in rows:
         user_id = r["user_id"]
-        bc_id = r["business_conn_id"]
+        bc_id = r["business_conn_id"] or tn_db.get_user_bc_id(conn, user_id)
         interval = r["interval_minutes"] or 5
         last_change = r["last_change"]
 
@@ -100,8 +101,10 @@ async def rotate_pair_bios(app, conn: sqlite3.Connection):
             bio1 = format_bio_with_watermark(line_1, prem1)
             bio2 = format_bio_with_watermark(line_2, prem2)
 
-            ok1 = await set_business_account_bio(app.bot, r["bc_id_1"], bio1) if r["bc_id_1"] else True
-            ok2 = await set_business_account_bio(app.bot, r["bc_id_2"], bio2) if r["bc_id_2"] else True
+            bc_1 = r["bc_id_1"] or tn_db.get_user_bc_id(conn, r["user_1"])
+            bc_2 = r["bc_id_2"] or tn_db.get_user_bc_id(conn, r["user_2"])
+            ok1 = await set_business_account_bio(app.bot, bc_1, bio1) if bc_1 else True
+            ok2 = await set_business_account_bio(app.bot, bc_2, bio2) if bc_2 else True
 
             if ok1 or ok2:
                 conn.execute("""

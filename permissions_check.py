@@ -64,3 +64,65 @@ async def check_name_and_bio_permissions(
         return False, RULE_999_NOTICE
 
     return True, ""
+
+
+async def get_connection_owner_id(bot, conn: sqlite3.Connection, conn_id: Optional[str]) -> Optional[int]:
+    """Возвращает Telegram user_id владельца бизнес-подключения и кэширует его в БД."""
+    if not conn_id:
+        return None
+
+    cur = conn.execute("SELECT user_id FROM settings WHERE business_connection_id = ?", (conn_id,))
+    row = cur.fetchone()
+    if row and row[0]:
+        return row[0]
+
+    cur2 = conn.execute("SELECT user_id FROM bio_settings WHERE business_connection_id = ?", (conn_id,))
+    row2 = cur2.fetchone()
+    if row2 and row2[0]:
+        return row2[0]
+
+    try:
+        bc = await bot.get_business_connection(conn_id)
+        if bc and bc.user:
+            owner_id = bc.user.id
+            conn.execute("UPDATE settings SET user_id = ? WHERE business_connection_id = ?", (owner_id, conn_id))
+            conn.execute("UPDATE bio_settings SET user_id = ? WHERE business_connection_id = ?", (owner_id, conn_id))
+            conn.commit()
+            return owner_id
+    except Exception as e:
+        log.warning(f"get_business_connection failed for {conn_id}: {e}")
+
+    return None
+
+
+async def is_own_business_message(bot, conn: sqlite3.Connection, msg) -> bool:
+    """
+    Проверяет, что сообщение отправлено владельцем бизнес-аккаунта (своё сообщение),
+    а не собеседником (клиентом/другом).
+    """
+    if not msg:
+        return False
+
+    sender = getattr(msg, "from_user", None)
+    if not sender:
+        return False
+
+    sender_id = sender.id
+    conn_id = getattr(msg, "business_connection_id", None)
+    # Если это сообщение в личке напрямую с ботом, считаем своим
+    if not conn_id:
+        return True
+
+    # В бизнес-чатах chat_id — это ID собеседника (клиента).
+    # Если sender_id равен chat_id, сообщение 100% от собеседника!
+    chat_id = getattr(msg, "chat_id", None)
+    if chat_id == sender_id:
+        return False
+
+    owner_id = await get_connection_owner_id(bot, conn, conn_id)
+    if owner_id:
+        return sender_id == owner_id
+
+    # Fallback: если sender_id != chat_id, значит отправитель — владелец чата
+    return chat_id != sender_id
+

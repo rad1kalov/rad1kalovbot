@@ -34,14 +34,28 @@ from stages import (
 )
 from timezone import today_str, now
 from admin_db import has_feature_access
+from permissions_check import is_own_business_message
 
 log = logging.getLogger(__name__)
 
 OWNER_ID = int(os.getenv("OWNER_ID", "8470104943"))
 
 
-def _is_owner(user_id: int) -> bool:
-    return user_id == OWNER_ID
+def get_series_owner_id(conn: sqlite3.Connection, s: dict) -> int:
+    bc_id = s.get("business_connection_id")
+    if bc_id:
+        row = conn.execute("SELECT user_id FROM settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+        if row and row[0]:
+            return row[0]
+        row2 = conn.execute("SELECT user_id FROM bio_settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+        if row2 and row2[0]:
+            return row2[0]
+    return OWNER_ID
+
+
+def is_series_owner(conn: sqlite3.Connection, user_id: int, s: dict) -> bool:
+    owner_id = get_series_owner_id(conn, s)
+    return user_id == owner_id or user_id == OWNER_ID
 
 
 def _get_max_limits(conn: sqlite3.Connection, user_id: int) -> Tuple[int, int]:
@@ -79,7 +93,8 @@ def build_stats_screen(s: dict, conn: sqlite3.Connection) -> Tuple[str, InlineKe
     if s.get("frozen"):
         status_str = "Заморожена ❄️"
 
-    max_rev, max_frz = _get_max_limits(conn, OWNER_ID)
+    owner_id = get_series_owner_id(conn, s)
+    max_rev, max_frz = _get_max_limits(conn, owner_id)
 
     lines = [
         "📊 *Подробная статистика серии*",
@@ -172,7 +187,8 @@ def build_protect_screen(s: dict, conn: sqlite3.Connection) -> Tuple[str, Inline
     auto_frz = bool(s.get("auto_freeze", 0))
 
     streak_state = f"Активен ({streak} дн.)" if streak > 0 else f"Сгорел (можно восстановить {pre_burn} дн.)" if pre_burn > 0 else "0 дней"
-    max_rev, max_frz = _get_max_limits(conn, OWNER_ID)
+    owner_id = get_series_owner_id(conn, s)
+    max_rev, max_frz = _get_max_limits(conn, owner_id)
 
     lines = [
         "🛡 *Защита и Восстановление серии*",
@@ -266,6 +282,12 @@ async def handle_series_command(update: Update, context: ContextTypes.DEFAULT_TY
     if not lower.startswith((".streak", "/streak", ".серия", "/серия")):
         return False
 
+    # Если команда отправлена в бизнес-чате, разрешаем её ТОЛЬКО владельцу аккаунта
+    if getattr(msg, "business_connection_id", None):
+        is_own = await is_own_business_message(context.bot, conn, msg)
+        if not is_own:
+            return False
+
     chat_id = msg.chat_id
     conn_id = getattr(msg, "business_connection_id", None)
     sender = msg.from_user
@@ -343,11 +365,12 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
 
     user_id = query.from_user.id if query.from_user else 0
     user_name = query.from_user.full_name if query.from_user else "Пользователь"
-    is_owner = _is_owner(user_id)
 
     s = get_series(conn, chat_id)
     if not s:
         s = ensure_series(conn, chat_id, getattr(query.message, "business_connection_id", None), user_name)
+
+    is_owner = is_series_owner(conn, user_id, s)
 
     # 1. Навигация по экранам
     if action == "main":
