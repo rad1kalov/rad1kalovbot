@@ -1,3 +1,6 @@
+# tn_worker.py
+"""Воркер динамического времени в профиле: обновляет last_name каждую минуту."""
+
 import asyncio
 import logging
 import sqlite3
@@ -8,21 +11,22 @@ import tn_db
 log = logging.getLogger(__name__)
 
 
-async def name_worker(app, conn: sqlite3.Connection, interval_seconds: int = 3600):
+async def name_worker(app, conn: sqlite3.Connection, interval_seconds: int = 60):
     """
-    Раз в interval_seconds обновляет last_name бизнес-аккаунта
-    на текущее время в формате [HH:MM].
+    Каждую минуту обновляет last_name бизнес-аккаунта
+    на текущее локальное время в формате [HH:MM].
     """
+    log.info("Воркер динамического времени (каждую минуту) запущен")
+
     while True:
         try:
             connections = tn_db.get_all_connections(conn)
             for c in connections:
                 bc_id = c["business_connection_id"]
-                offset = c["tz_offset"] or 0
+                offset = c["tz_offset"] if c["tz_offset"] is not None else 3
                 first_name = c["first_name"]
 
                 if not first_name:
-                    log.warning("skip %s: first_name неизвестен", bc_id)
                     continue
 
                 tz = timezone(timedelta(hours=offset))
@@ -34,10 +38,14 @@ async def name_worker(app, conn: sqlite3.Connection, interval_seconds: int = 360
                         first_name=first_name,
                         last_name=time_str,
                     )
-                    log.info("обновил имя %s -> %s %s", bc_id, first_name, time_str)
                 except Exception as e:
-                    log.error("set_business_account_name failed для %s: %s", bc_id, e)
+                    # Логируем с пониженным уровнем при частых повторах или ограничениях API
+                    log.warning("set_business_account_name failed для %s: %s", bc_id, e)
+
         except Exception as e:
             log.error("name_worker ошибка: %s", e)
 
-        await asyncio.sleep(interval_seconds)
+        # Выравниваем сон ровно до начала следующей минуты
+        now_sec = datetime.now().second
+        sleep_time = max(1, interval_seconds - now_sec)
+        await asyncio.sleep(sleep_time)

