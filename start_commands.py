@@ -54,7 +54,8 @@ INSTRUCTION_TEXT = (
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📖 Подробная инструкция", callback_data="instruction")]
+        [InlineKeyboardButton("💎 Премиум подписка", callback_data="prem:main")],
+        [InlineKeyboardButton("📖 Подробная инструкция", callback_data="instruction")],
     ])
 
 

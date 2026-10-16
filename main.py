@@ -9,11 +9,13 @@ from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
     Application,
+    BusinessConnectionHandler,
     BusinessMessagesDeletedHandler,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    PreCheckoutQueryHandler,
     filters,
 )
 
@@ -28,6 +30,15 @@ from tn_db import init_settings_table
 
 from start_commands import start_command, help_command, instruction_callback, HELP_SUMMARY_TEXT
 from autostop_db import init_bot_config, is_autostop_active, toggle_autostop
+from premium_db import init_premium_db, is_premium
+from bio_worker import bio_worker, on_business_connection_update
+from premium_commands import (
+    premium_command,
+    handle_premium_callback,
+    pre_checkout_handler,
+    successful_payment_handler,
+    give_premium_admin_command,
+)
 
 load_dotenv()
 
@@ -71,6 +82,7 @@ DB = init_db()
 init_series_db(DB)
 init_settings_table(DB)
 init_bot_config(DB)
+init_premium_db(DB)
 
 
 # ─────────────────────────── СКРЫТЫЙ ПЕРЕХВАТ ────────────────────────
@@ -260,6 +272,11 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logging.error(f"send help failed: {e}")
             return
 
+        # Команда .premium / /premium
+        if clean in (".premium", "/premium"):
+            await premium_command(update, context, DB)
+            return
+
         # Команда .time
         if await handle_time_command(update, context, DB):
             return
@@ -426,21 +443,32 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
+    # Подключение к Telegram Business (установка био и водяного знака)
+    app.add_handler(BusinessConnectionHandler(lambda u, c: on_business_connection_update(u, c, DB)))
+
     # Команды бота (в личных сообщениях)
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("streak", lambda u, c: handle_series_command(u, c, DB)))
     app.add_handler(CommandHandler("avtostop", avtostop_command))
+    app.add_handler(CommandHandler("premium", lambda u, c: premium_command(u, c, DB)))
+    app.add_handler(CommandHandler("give_premium", lambda u, c: give_premium_admin_command(u, c, DB)))
 
     # Команды через точку в личных сообщениях
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.help\b"), help_command))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.avtostop\b"), avtostop_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
+
+    # Платежи через Telegram Stars (Payments 2.0)
+    app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
+    app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, lambda u, c: successful_payment_handler(u, c, DB)))
 
     # Инлайн-кнопки
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_series_callback(u, c, DB), pattern=r"^strk:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_time_callback(u, c, DB), pattern=r"^tz:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_premium_callback(u, c, DB), pattern=r"^prem:"))
     app.add_handler(CallbackQueryHandler(instruction_callback, pattern=r"^(instruction|start_back)$"))
 
     # Новые бизнес-сообщения (включая ответы)
@@ -457,6 +485,7 @@ def main():
         
         worker_task = asyncio.create_task(series_worker(app, DB))
         name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=60))
+        bio_task = asyncio.create_task(bio_worker(app, DB, interval_seconds=300))
 
         stop_event = asyncio.Event()
 
@@ -476,7 +505,8 @@ def main():
         
         worker_task.cancel()
         name_task.cancel()
-        for t in (worker_task, name_task):
+        bio_task.cancel()
+        for t in (worker_task, name_task, bio_task):
             try:
                 await t
             except asyncio.CancelledError:
