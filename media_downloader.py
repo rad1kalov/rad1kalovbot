@@ -249,6 +249,26 @@ def _fetch_yandex_music_info_sync(url: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _escape_md(text: str) -> str:
+    """Экранирует специальные символы Markdown v1 для безопасной отправки."""
+    if not text:
+        return ""
+    return re.sub(r"([_*`\[\]])", r"\\\1", str(text))
+
+
+async def _safe_edit_text(query, text: str, reply_markup=None, parse_mode: Optional[str] = "Markdown") -> None:
+    """Безопасное редактирование сообщения с защитой от ошибок парсинга Markdown."""
+    try:
+        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception as e:
+        log.debug("safe_edit_text Markdown failed (%s), fallback plain text", e)
+        plain = re.sub(r"[*_`]", "", text)
+        try:
+            await query.edit_message_text(plain, reply_markup=reply_markup)
+        except Exception:
+            pass
+
+
 def fetch_media_info_sync(url: str) -> Dict[str, Any]:
     """Извлекает информацию о медиа через yt-dlp без скачивания."""
     # Для Яндекс Музыки используем прямой API
@@ -264,6 +284,9 @@ def fetch_media_info_sync(url: str) -> Dict[str, Any]:
         "no_warnings": True,
         "skip_download": True,
         "extract_flat": False,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "socket_timeout": 15,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
@@ -318,11 +341,12 @@ def build_download_panel(
         limit_line = f"{cur_cnt}/{max_cnt} в этом месяце"
 
     dur_line = f"⏱ Длительность: *{duration}*\n" if duration else ""
+    safe_title = _escape_md(title)
 
     text = (
         f"{icon} *{platform}* • Найдено медиа!\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"📹 *{title}*\n"
+        f"📹 *{safe_title}*\n"
         f"{dur_line}"
         f"⚙️ Качество: *{qual}*\n"
         f"📊 Лимит скачиваний: *{limit_line}*\n"
@@ -389,6 +413,40 @@ def build_quality_menu(session_id: str, current_qual: str, is_prem: bool) -> Tup
     return text, InlineKeyboardMarkup(rows)
 
 
+def get_ffmpeg_path() -> Optional[str]:
+    """
+    Находит доступный исполняемый файл ffmpeg:
+    1. Системный PATH
+    2. Встроенный через библиотеку imageio-ffmpeg
+    3. Локальные папки проекта
+    """
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+
+    try:
+        import imageio_ffmpeg
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and os.path.exists(exe):
+            return exe
+    except Exception:
+        pass
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base_dir, "data", "bin", "ffmpeg.exe"),
+        os.path.join(base_dir, "bin", "ffmpeg.exe"),
+        os.path.join(base_dir, "ffmpeg.exe"),
+        os.path.join(base_dir, "data", "bin", "ffmpeg"),
+        os.path.join(base_dir, "bin", "ffmpeg"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+
+    return None
+
+
 def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple[Optional[str], Optional[str], Optional[int]]:
     """
     Синхронно скачивает файл через yt-dlp во временный каталог.
@@ -409,7 +467,7 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
         "2160p": 2160,
     }
     max_h = height_map.get(quality, 1080)
-    has_ffmpeg = bool(shutil.which("ffmpeg"))
+    ffmpeg_bin = get_ffmpeg_path()
 
     custom_title = None
     target_url = url
@@ -423,7 +481,7 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
 
     if is_audio:
         postprocessors = []
-        if has_ffmpeg:
+        if ffmpeg_bin:
             postprocessors.append({
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
@@ -435,22 +493,34 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
             "quiet": True,
             "no_warnings": True,
             "postprocessors": postprocessors,
+            "noplaylist": True,
+            "nocheckcertificate": True,
+            "socket_timeout": 30,
         }
+        if ffmpeg_bin:
+            ydl_opts["ffmpeg_location"] = ffmpeg_bin
     else:
-        # Умный выбор формата: скачивание наилучшего в рамках max_h
-        # Совместимо и с ffmpeg, и без него
         ydl_opts = {
             "outtmpl": out_tmpl,
-            "format": (
-                f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/"
-                f"best[height<={max_h}][ext=mp4]/"
-                f"bestvideo[height<={max_h}]+bestaudio/"
-                f"best[height<={max_h}]/best"
-            ),
             "quiet": True,
             "no_warnings": True,
-            "merge_output_format": "mp4",
+            "noplaylist": True,
+            "nocheckcertificate": True,
+            "socket_timeout": 30,
         }
+        if ffmpeg_bin:
+            ydl_opts["ffmpeg_location"] = ffmpeg_bin
+            ydl_opts["merge_output_format"] = "mp4"
+            ydl_opts["format"] = (
+                f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"bestvideo[height<={max_h}]+bestaudio/"
+                f"best[height<={max_h}][ext=mp4]/"
+                f"best[height<={max_h}]/best"
+            )
+        else:
+            # Если ffmpeg отсутствует, скачиваем готовый единый поток без слияния,
+            # чтобы yt-dlp никогда не выдавал ошибку "merging of multiple formats but ffmpeg is not installed"
+            ydl_opts["format"] = f"best[height<={max_h}][ext=mp4]/best[height<={max_h}]/best"
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -465,10 +535,17 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
 
             title = custom_title or (info.get("title") if isinstance(info, dict) else None) or "Медиафайл"
 
-            # Находим скачанный файл в папке
-            files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if os.path.isfile(os.path.join(temp_dir, f))]
+            # Находим скачанный файл в папке, исключая временные фрагменты
+            files = [
+                os.path.join(temp_dir, f) for f in os.listdir(temp_dir)
+                if os.path.isfile(os.path.join(temp_dir, f))
+                and not f.endswith((".part", ".ytdl", ".temp", ".aria2"))
+            ]
             if not files:
-                return None, "Файл не найден после завершения скачивания", None
+                part_files = [f for f in os.listdir(temp_dir) if f.endswith((".part", ".ytdl"))]
+                if part_files:
+                    return None, "Загрузка файла была прервана сетью. Попробуйте ещё раз.", None
+                return None, "Медиафайл не удалось сохранить. Возможно, видео защищено от скачивания или недоступно.", None
 
             # Берём самый крупный скачанный файл (на случай промежуточных)
             target_file = max(files, key=os.path.getsize)
@@ -479,10 +556,12 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
         err_msg = str(e)
         if "NoneType" in err_msg:
             err_msg = "Сервис заблокировал прямой доступ к медиафайлу (требуется авторизация или VPN)."
-        elif "ffprobe and ffmpeg not found" in err_msg:
-            err_msg = "Для конвертации аудио требуется ffmpeg."
-        elif "404" in err_msg or "Not Found" in err_msg:
-            err_msg = "Медиафайл не найден на сервере сервиса."
+        elif "merging of multiple formats" in err_msg or "ffprobe and ffmpeg not found" in err_msg:
+            err_msg = "Для объединения видео и звука в этом качестве требуется ffmpeg (он автоматически устанавливается с imageio-ffmpeg)."
+        elif "404" in err_msg or "Not Found" in err_msg or "is unavailable" in err_msg:
+            err_msg = "Медиафайл не найден или недоступен (возможно, удалён автором)."
+        elif "timed out" in err_msg or "getaddrinfo failed" in err_msg:
+            err_msg = "Таймаут соединения с сервисом. Попробуйте ещё раз."
         return None, err_msg, None
 
 
@@ -575,9 +654,11 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return True
 
-        await query.edit_message_text(
+        safe_title = _escape_md(title)
+        await _safe_edit_text(
+            query,
             f"⏳ *Скачиваю аудиодорожку (MP3)…*\n"
-            f"📹 {title}\n\n"
+            f"📹 {safe_title}\n\n"
             f"Пожалуйста, подождите немного…",
             parse_mode="Markdown",
         )
@@ -588,15 +669,17 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
         if not file_path or not os.path.exists(file_path):
-            await query.edit_message_text(f"❌ Ошибка скачивания аудио: {err_or_title}")
+            await _safe_edit_text(query, f"❌ Ошибка скачивания аудио: {err_or_title}", parse_mode=None)
             return True
 
         # Проверка лимита Telegram Bot API (50 МБ)
         max_bytes = 50 * 1024 * 1024
         if file_size and file_size > max_bytes:
             size_mb = file_size / (1024 * 1024)
-            await query.edit_message_text(
-                f"⚠️ Размер аудио ({size_mb:.1f} МБ) превышает лимит отправки Telegram Bot API (50 МБ)."
+            await _safe_edit_text(
+                query,
+                f"⚠️ Размер аудио ({size_mb:.1f} МБ) превышает лимит отправки Telegram Bot API (50 МБ).",
+                parse_mode=None,
             )
             try:
                 os.remove(file_path)
@@ -604,26 +687,38 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 pass
             return True
 
-        await query.edit_message_text("📤 *Отправляю аудио в Telegram…*", parse_mode="Markdown")
+        await _safe_edit_text(query, "📤 *Отправляю аудио в Telegram…*", parse_mode="Markdown")
 
         try:
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
                 base_ext = os.path.splitext(file_path)[1] or ".mp3"
-                clean_filename = f"{title[:40]}{base_ext}"
-                await context.bot.send_audio(
-                    chat_id=query.message.chat_id,
-                    audio=InputFile(f, filename=clean_filename),
-                    title=title,
-                    caption=f"{icon} *{title}*\n🎵 Аудио | Скачано через @rad1kal_bot",
-                    parse_mode="Markdown",
-                    business_connection_id=bc_id,
-                )
+                clean_title = re.sub(r'[\r\n\\/:*?"<>|]+', ' ', title).strip()[:40] or "audio"
+                clean_filename = f"{clean_title}{base_ext}"
+                try:
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id,
+                        audio=InputFile(f, filename=clean_filename),
+                        title=title,
+                        caption=f"{icon} *{safe_title}*\n🎵 Аудио | Скачано через @rad1kal_bot",
+                        parse_mode="Markdown",
+                        business_connection_id=bc_id,
+                    )
+                except Exception as e_caption:
+                    log.warning("send_audio markdown caption failed (%s), fallback plain text", e_caption)
+                    f.seek(0)
+                    await context.bot.send_audio(
+                        chat_id=query.message.chat_id,
+                        audio=InputFile(f, filename=clean_filename),
+                        title=title,
+                        caption=f"{icon} {clean_title}\n🎵 Аудио | Скачано через @rad1kal_bot",
+                        business_connection_id=bc_id,
+                    )
             record_media_download(conn, user_id, url, platform, title, "audio_mp3", file_size or 0)
-            await query.edit_message_text(f"✅ *Аудио успешно отправлено!*\n📹 {title}", parse_mode="Markdown")
+            await _safe_edit_text(query, f"✅ *Аудио успешно отправлено!*\n📹 {safe_title}", parse_mode="Markdown")
         except Exception as e:
             log.error("send_audio error: %s", e)
-            await query.edit_message_text(f"❌ Не удалось отправить аудио: {e}")
+            await _safe_edit_text(query, f"❌ Не удалось отправить аудио: {e}", parse_mode=None)
         finally:
             try:
                 os.remove(file_path)
@@ -644,9 +739,11 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
             )
             return True
 
-        await query.edit_message_text(
+        safe_title = _escape_md(title)
+        await _safe_edit_text(
+            query,
             f"⏳ *Скачиваю видео ({quality})…*\n"
-            f"📹 {title}\n\n"
+            f"📹 {safe_title}\n\n"
             f"Пожалуйста, подождите, это может занять от нескольких секунд до минуты…",
             parse_mode="Markdown",
         )
@@ -657,15 +754,17 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
         if not file_path or not os.path.exists(file_path):
-            await query.edit_message_text(f"❌ Ошибка скачивания видео: {err_or_title}")
+            await _safe_edit_text(query, f"❌ Ошибка скачивания видео: {err_or_title}", parse_mode=None)
             return True
 
         max_bytes = 50 * 1024 * 1024
         if file_size and file_size > max_bytes:
             size_mb = file_size / (1024 * 1024)
-            await query.edit_message_text(
+            await _safe_edit_text(
+                query,
                 f"⚠️ Размер видео ({size_mb:.1f} МБ) превышает лимит отправки Telegram Bot API (50 МБ).\n"
-                f"Попробуйте выбрать меньшее качество (например, 720p или 480p)."
+                f"Попробуйте выбрать меньшее качество (например, 720p или 480p).",
+                parse_mode=None,
             )
             try:
                 os.remove(file_path)
@@ -673,26 +772,38 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 pass
             return True
 
-        await query.edit_message_text("📤 *Отправляю видео в Telegram…*", parse_mode="Markdown")
+        await _safe_edit_text(query, "📤 *Отправляю видео в Telegram…*", parse_mode="Markdown")
 
         try:
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
                 base_ext = os.path.splitext(file_path)[1] or ".mp4"
-                clean_filename = f"{title[:40]}{base_ext}"
-                await context.bot.send_video(
-                    chat_id=query.message.chat_id,
-                    video=InputFile(f, filename=clean_filename),
-                    caption=f"{icon} *{title}*\nКачество: {quality} | @rad1kal_bot",
-                    parse_mode="Markdown",
-                    supports_streaming=True,
-                    business_connection_id=bc_id,
-                )
+                clean_title = re.sub(r'[\r\n\\/:*?"<>|]+', ' ', title).strip()[:40] or "video"
+                clean_filename = f"{clean_title}{base_ext}"
+                try:
+                    await context.bot.send_video(
+                        chat_id=query.message.chat_id,
+                        video=InputFile(f, filename=clean_filename),
+                        caption=f"{icon} *{safe_title}*\nКачество: {quality} | @rad1kal_bot",
+                        parse_mode="Markdown",
+                        supports_streaming=True,
+                        business_connection_id=bc_id,
+                    )
+                except Exception as e_caption:
+                    log.warning("send_video markdown caption failed (%s), fallback plain text", e_caption)
+                    f.seek(0)
+                    await context.bot.send_video(
+                        chat_id=query.message.chat_id,
+                        video=InputFile(f, filename=clean_filename),
+                        caption=f"{icon} {clean_title}\nКачество: {quality} | @rad1kal_bot",
+                        supports_streaming=True,
+                        business_connection_id=bc_id,
+                    )
             record_media_download(conn, user_id, url, platform, title, quality, file_size or 0)
-            await query.edit_message_text(f"✅ *Видео успешно отправлено!*\n📹 {title}", parse_mode="Markdown")
+            await _safe_edit_text(query, f"✅ *Видео успешно отправлено!*\n📹 {safe_title}", parse_mode="Markdown")
         except Exception as e:
             log.error("send_video error: %s", e)
-            await query.edit_message_text(f"❌ Не удалось отправить видео: {e}")
+            await _safe_edit_text(query, f"❌ Не удалось отправить видео: {e}", parse_mode=None)
         finally:
             try:
                 os.remove(file_path)
