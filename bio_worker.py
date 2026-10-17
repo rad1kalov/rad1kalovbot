@@ -16,10 +16,10 @@ log = logging.getLogger(__name__)
 WATERMARK_TAG = "user @rad1kal_bot"
 WATERMARK_SUFFIX = " | " + WATERMARK_TAG
 
-ADMIN_TAG = "admin @rad1kal_bot"
+ADMIN_TAG = "admin of @rad1kal_bot"
 ADMIN_SUFFIX = " | " + ADMIN_TAG
 
-DEV_TAG = "dev @rad1kal_bot"
+DEV_TAG = "dev of @rad1kal_bot"
 DEV_SUFFIX = " | " + DEV_TAG
 
 ALL_WATERMARK_TAGS = [WATERMARK_TAG, ADMIN_TAG, DEV_TAG]
