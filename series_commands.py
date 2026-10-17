@@ -1,13 +1,14 @@
 # series_commands.py
 """Интерактивное управление серией общения через единую команду .streak с карточками и темами оформления."""
 
+import io
 import logging
 import os
 import sqlite3
 from datetime import datetime, timezone as _tz
 from typing import Tuple
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
 from series import plural_days
@@ -20,6 +21,7 @@ from series_db import (
     set_stage,
     get_all_active_series,
 )
+from series_story import create_story_card
 from series_styles import format_styled_streak_card
 from stages import (
     stage_name,
@@ -80,6 +82,9 @@ def build_main_screen(s: dict) -> Tuple[str, InlineKeyboardMarkup]:
         [
             InlineKeyboardButton("🛡 Защита", callback_data=f"strk:protect:{chat_id}"),
             InlineKeyboardButton("⚙️ Настройки", callback_data=f"strk:settings:{chat_id}"),
+        ],
+        [
+            InlineKeyboardButton("📸 Открытка для Stories", callback_data=f"strk:story:{chat_id}"),
         ],
     ]
 
@@ -403,7 +408,60 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text=text_content, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
-    # 2. История и Топ
+    # 1.5. Генерация юбилейной открытки для Telegram Stories
+    elif action == "story":
+        await query.answer("📸 Генерирую открытку…")
+
+        # Определяем owner (user1) и собеседника (user2)
+        owner_id = get_series_owner_id(conn, s)
+        partner_name = s.get("last_user_name") or "Собеседник"
+
+        # Пытаемся определить user_id собеседника по chat_id
+        # В бизнес-чатах chat_id == user_id собеседника
+        partner_id = chat_id if chat_id != owner_id else 0
+
+        # Определяем имя владельца
+        try:
+            owner_chat = await context.bot.get_chat(owner_id)
+            owner_name = owner_chat.full_name or owner_chat.first_name or "Вы"
+        except Exception:
+            owner_name = user_name if user_id == owner_id else "Вы"
+
+        try:
+            buf = await create_story_card(
+                bot=context.bot,
+                s=s,
+                user1_id=owner_id,
+                user1_name=owner_name,
+                user2_id=partner_id,
+                user2_name=partner_name,
+            )
+            conn_id = s.get("business_connection_id")
+
+            back_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"strk:main:{chat_id}")]
+            ])
+
+            await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=InputFile(buf, filename="streak_story.png"),
+                caption="📸 *Юбилейная открытка для Stories!*\nСохрани и выложи в историю Telegram ✨",
+                parse_mode="Markdown",
+                business_connection_id=conn_id,
+                reply_markup=back_keyboard,
+            )
+        except Exception as e:
+            log.error(f"Story card generation failed: {e}")
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="❌ Не удалось сгенерировать открытку. Попробуйте позже.",
+                    business_connection_id=s.get("business_connection_id"),
+                )
+            except Exception:
+                pass
+        return True
+
     elif action == "hist":
         await query.answer()
         conn.row_factory = sqlite3.Row

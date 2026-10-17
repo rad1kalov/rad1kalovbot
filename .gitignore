@@ -13,3 +13,6 @@ ENV/
 # Database & local data
 *.db
 downloads/
+data/*
+!data/.gitkeep
+

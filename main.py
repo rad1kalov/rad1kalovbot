@@ -6,7 +6,7 @@ import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
 
-from telegram import Update
+from telegram import InputFile, Update
 from telegram.ext import (
     Application,
     BusinessConnectionHandler,
@@ -19,16 +19,18 @@ from telegram.ext import (
     filters,
 )
 
-from series_db import init_series_db
+from series_db import init_series_db, get_series
 from series import process_message, build_summary
 from series_commands import handle_series_command, handle_series_callback
+from series_story import create_story_card
 from series_worker import series_worker
 
 from tn_commands import handle_time_command, handle_time_callback, handle_weather_command, send_timezone_menu
 from tn_worker import name_worker
 from tn_db import init_settings_table, get_ephemeral_limit_for_user
 
-from start_commands import start_command, help_command, instruction_callback, HELP_SUMMARY_TEXT
+from start_commands import start_command, help_command, instruction_callback, HELP_SUMMARY_TEXT, webapp_command
+from webapp_server import start_webapp_server
 from autostop_db import init_bot_config, is_autostop_active, toggle_autostop
 from premium_db import init_premium_db, is_premium
 from bio_worker import bio_worker, on_business_connection_update
@@ -63,15 +65,52 @@ load_dotenv()
 # ─────────────────────────── КОНФИГУРАЦИЯ ───────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")        # токен от @BotFather
 OWNER_ID = 8470104943                  # ваш user_id (узнать у @userinfobot)
-DB_PATH = "messages.db"
-MEDIA_DIR = "downloads"
+
+DATA_DIR = os.getenv("DATA_DIR", "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(DATA_DIR, "messages.db")
+MEDIA_DIR = os.path.join(DATA_DIR, "downloads")
+os.makedirs(MEDIA_DIR, exist_ok=True)
+
+WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0")
+WEBAPP_PORT = int(os.getenv("PORT", os.getenv("WEBAPP_PORT", "3000")))
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://bot.rad1kal.fun")
 # ────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
-os.makedirs(MEDIA_DIR, exist_ok=True)
+
+
+def _migrate_old_storage() -> None:
+    """Бережно переносит существующую БД и скачанные медиафайлы из корня в папку data/ при первом запуске."""
+    old_db = "messages.db"
+    if not os.path.exists(DB_PATH) and os.path.exists(old_db):
+        try:
+            import shutil
+            shutil.copy2(old_db, DB_PATH)
+            logging.info("Миграция: %s скопирован в %s", old_db, DB_PATH)
+        except Exception as e:
+            logging.error("Ошибка при миграции %s в %s: %s", old_db, DB_PATH, e)
+
+    old_downloads = "downloads"
+    if os.path.exists(old_downloads) and os.path.isdir(old_downloads):
+        try:
+            import shutil
+            if os.path.abspath(old_downloads) != os.path.abspath(MEDIA_DIR):
+                for item in os.listdir(old_downloads):
+                    src_f = os.path.join(old_downloads, item)
+                    dst_f = os.path.join(MEDIA_DIR, item)
+                    if not os.path.exists(dst_f):
+                        shutil.move(src_f, dst_f)
+                logging.info("Миграция: медиафайлы из %s перенесены в %s", old_downloads, MEDIA_DIR)
+        except Exception as e:
+            logging.error("Ошибка при миграции медиафайлов: %s", e)
+
+
+_migrate_old_storage()
 
 
 # ─────────────────────────── БАЗА ДАННЫХ ────────────────────────────
@@ -424,6 +463,50 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except Exception as e:
                     logging.error(f"send series summary failed: {e}")
 
+            # Автоматическая отправка юбилейной открытки при milestone или stage_up
+            if info.get("is_milestone") or info.get("stage_up"):
+                try:
+                    s = get_series(DB, msg.chat_id)
+                    if s:
+                        # Определяем владельца и собеседника
+                        owner_id_val = OWNER_ID
+                        bc_id = s.get("business_connection_id")
+                        if bc_id:
+                            from permissions_check import get_connection_owner_id as _get_owner
+                            try:
+                                resolved = await _get_owner(context.bot, DB, bc_id)
+                                if resolved:
+                                    owner_id_val = resolved
+                            except Exception:
+                                pass
+
+                        partner_name = s.get("last_user_name") or from_name
+                        partner_id = msg.chat_id if msg.chat_id != owner_id_val else 0
+
+                        try:
+                            owner_chat = await context.bot.get_chat(owner_id_val)
+                            owner_name = owner_chat.full_name or owner_chat.first_name or "Вы"
+                        except Exception:
+                            owner_name = "Вы"
+
+                        buf = await create_story_card(
+                            bot=context.bot,
+                            s=s,
+                            user1_id=owner_id_val,
+                            user1_name=owner_name,
+                            user2_id=partner_id,
+                            user2_name=partner_name,
+                        )
+                        await context.bot.send_photo(
+                            chat_id=msg.chat_id,
+                            photo=InputFile(buf, filename="streak_story.png"),
+                            caption="📸 *Юбилейная открытка!*\nСохрани и выложи в историю Telegram ✨",
+                            parse_mode="Markdown",
+                            business_connection_id=msg.business_connection_id,
+                        )
+                except Exception as e:
+                    logging.error(f"auto story card failed: {e}")
+
 
 # ─────────────────────── ИЗМЕНЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_edited_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -532,6 +615,7 @@ def main():
 
     # Команды бота
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler(["app", "webapp"], webapp_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("streak", lambda u, c: handle_series_command(u, c, DB)))
     app.add_handler(CommandHandler("avtostop", avtostop_command))
@@ -548,6 +632,7 @@ def main():
 
     # Команды через точку в личных сообщениях с ботом (исключая бизнес-сообщения)
     dm_filter = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(app|webapp)\b"), webapp_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.help\b"), help_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
@@ -597,10 +682,23 @@ def main():
         await app.start()
         await app.updater.start_polling()
 
+        if WEBAPP_URL:
+            try:
+                from telegram import MenuButtonWebApp, WebAppInfo
+                await app.bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(text="📱 Mini App", web_app=WebAppInfo(url=WEBAPP_URL))
+                )
+                logging.info("Кнопка меню Mini App установлена: %s", WEBAPP_URL)
+            except Exception as e:
+                logging.warning("Не удалось установить MenuButtonWebApp: %s", e)
+
         worker_task = asyncio.create_task(series_worker(app, DB))
         name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=60))
         bio_task = asyncio.create_task(bio_worker(app, DB, interval_seconds=300))
         desc_task = asyncio.create_task(description_worker(app, DB, interval_seconds=60))
+        webapp_task = asyncio.create_task(
+            start_webapp_server(app, DB, BOT_TOKEN, OWNER_ID, host=WEBAPP_HOST, port=WEBAPP_PORT)
+        )
 
         stop_event = asyncio.Event()
 
@@ -621,7 +719,8 @@ def main():
         name_task.cancel()
         bio_task.cancel()
         desc_task.cancel()
-        for t in (worker_task, name_task, bio_task, desc_task):
+        webapp_task.cancel()
+        for t in (worker_task, name_task, bio_task, desc_task, webapp_task):
             try:
                 await t
             except asyncio.CancelledError:

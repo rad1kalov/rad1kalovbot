@@ -62,13 +62,47 @@ INSTRUCTION_TEXT = (
 )
 
 
+import os
+
 def get_start_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    buttons = []
+    webapp_url = os.getenv("WEBAPP_URL", "https://bot.rad1kal.fun")
+    if webapp_url:
+        buttons.append([InlineKeyboardButton("📱 Открыть Mini App", web_app=WebAppInfo(url=webapp_url))])
+
+    buttons.extend([
         [InlineKeyboardButton("🕒 Время в имени", callback_data="time:open_start")],
         [InlineKeyboardButton("📝 Авто-описание", callback_data="desc:open_start")],
         [InlineKeyboardButton("💎 Премиум подписка", callback_data="prem:main")],
         [InlineKeyboardButton("📖 Подробная инструкция", callback_data="instruction")],
     ])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def webapp_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команд /app и /webapp."""
+    target = update.effective_message or update.message
+    if not target:
+        return
+    webapp_url = os.getenv("WEBAPP_URL", "https://bot.rad1kal.fun")
+    if webapp_url:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📱 Открыть Mini App", web_app=WebAppInfo(url=webapp_url))]
+        ])
+        await target.reply_text(
+            "📱 *Telegram Mini App*\n\nНажмите кнопку ниже для открытия панели управления:",
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+    else:
+        await target.reply_text(
+            "📱 *Telegram Mini App*\n\n"
+            "Сервер Mini App активен!\n"
+            "Чтобы кнопка открывалась прямо в приложении Telegram, добавьте публичный HTTPS адрес в `.env`:\n"
+            "`WEBAPP_URL=https://ваш-домен.com`\n\n"
+            "_Telegram требует HTTPS для отображения WebApp внутри приложения._",
+            parse_mode="Markdown",
+        )
 
 
 def get_instruction_keyboard() -> InlineKeyboardMarkup:
