@@ -379,7 +379,8 @@
       font-weight: 500;
       text-decoration: none;
       cursor: pointer;
-      width: 25%;
+      flex: 1;
+      min-width: 0;
       height: 100%;
       transition: color 0.2s;
     }
@@ -661,13 +662,168 @@
       </div>
     </div>
 
+    <!-- TAB 5: ПАРНОЕ БИО -->
+    <div id="tab-pair-bio" class="tab-content">
+      <!-- Активное/ожидающее парное био -->
+      <div id="pair-active-container" class="card" style="display: none;">
+        <div class="card-title">
+          <span>👥 Статус парного описания</span>
+          <span id="pair-status-badge" class="status-pill">Активно ✅</span>
+        </div>
+        <div class="form-group">
+          <div style="font-size: 14px; margin-bottom: 6px;">
+            Партнер: <strong id="pair-partner-name">@partner</strong>
+          </div>
+          <div style="font-size: 13px; color: var(--hint-color); margin-bottom: 10px;">
+            Интервал: <span id="pair-interval-text">каждые 5 мин</span>
+          </div>
+          <div class="form-label">Строки ротации:</div>
+          <div id="pair-active-lines-preview" style="background: rgba(15, 23, 42, 0.5); border: 1px solid var(--card-border); border-radius: 12px; padding: 10px; font-size: 13px; margin-bottom: 14px;"></div>
+        </div>
+        <button id="cancel-pair-bio-btn" class="btn btn-danger">
+          🗑 Отключить парное био
+        </button>
+      </div>
+
+      <!-- Форма создания нового парного био -->
+      <div id="pair-create-container" class="card">
+        <div class="card-title">
+          <span>👥 Настройка парного био</span>
+          <span class="status-pill">Синхронно</span>
+        </div>
+        <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 14px;">
+          Парное описание циклически меняется у вас и собеседника. Нечётные строки будут у вас, чётные — у собеседника.
+        </p>
+
+        <div class="form-group">
+          <label class="form-label">Собеседник</label>
+          <input type="text" id="pair-friend-input" class="input-text" placeholder="@username друга (должен запустить бота)">
+          <div class="form-hint">Друг получит запрос на подтверждение в боте.</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Интервал смены строк</label>
+          <select id="pair-interval-select">
+            <option value="1">Каждую 1 минуту</option>
+            <option value="5" selected>Каждые 5 минут</option>
+            <option value="15">Каждые 15 минут</option>
+            <option value="30">Каждые 30 минут</option>
+            <option value="60">Раз в 1 час</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Строки для парной смены</label>
+          <div id="pair-lines-container"></div>
+          <button id="add-pair-line-btn" class="btn btn-secondary" style="margin-top: 6px; padding: 10px;">
+            ➕ Добавить строку
+          </button>
+          <div class="form-hint">Строка 1, 3... — ваши; Строка 2, 4... — друга.</div>
+        </div>
+
+        <button id="send-pair-invite-btn" class="btn" style="margin-top: 10px;">
+          💌 Отправить предложение собеседнику
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 6: АДМИН-ПАНЕЛЬ (только для рангов) -->
+    <div id="tab-admin" class="tab-content">
+      <div class="card" style="border-color: rgba(234, 179, 8, 0.4);">
+        <div class="card-title">
+          <span>👑 Панель управления</span>
+          <span id="admin-rank-badge" class="status-pill" style="background: rgba(234, 179, 8, 0.2); color: #eab308;">Администратор</span>
+        </div>
+        <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
+          Вкладка доступна только владельцу и назначенным администраторам бота.
+        </p>
+
+        <!-- Тег в описании для админов -->
+        <div class="form-group">
+          <label class="form-label">🏷 Тег статуса в описании профиля</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="admin-tag-select" style="flex: 1;">
+              <option value="off">Выключен (без метки)</option>
+              <option value="admin">#admin</option>
+              <option value="dev">#dev</option>
+              <option value="user">#user</option>
+            </select>
+            <button id="save-tag-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px;">
+              ОК
+            </button>
+          </div>
+          <div class="form-hint">Метка роли в конце вашего био в Telegram.</div>
+        </div>
+      </div>
+
+      <!-- Выдача Premium и функций -->
+      <div class="card">
+        <div class="card-title">
+          <span>💎 Выдача Premium и прав</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Пользователь</label>
+          <input type="text" id="grant-user-input" class="input-text" placeholder="@username или ID пользователя">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Функция</label>
+          <select id="grant-feature-select">
+            <option value="premium">💎 Полный Премиум</option>
+            <option value="custom_stage">🎭 Кастомные стадии</option>
+            <option value="hide_stage">🔒 Скрытие стадий</option>
+            <option value="weather">⛅️ Погода в имени</option>
+            <option value="pair_bio">👥 Парные описания</option>
+            <option value="all">🌟 Все функции</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Срок действия (дней)</label>
+          <input type="number" id="grant-days-input" class="input-text" placeholder="30 (оставьте пустым для бессрочного)">
+        </div>
+        <button id="grant-feature-btn" class="btn">
+          ✨ Выдать доступ
+        </button>
+      </div>
+
+      <!-- Управление администраторами -->
+      <div id="admin-management-card" class="card">
+        <div class="card-title">
+          <span>👥 Список администраторов</span>
+        </div>
+        <div id="admins-list-container" style="margin-bottom: 14px;"></div>
+        <div class="form-group">
+          <label class="form-label">Назначить администратора</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="new-admin-input" class="input-text" placeholder="@username или ID" style="flex: 1;">
+            <button id="add-admin-btn" class="btn" style="width: auto; padding: 0 16px;">
+              ➕
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Массовая рассылка -->
+      <div class="card">
+        <div class="card-title">
+          <span>📢 Массовая рассылка</span>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Текст сообщения (поддерживает Markdown)</label>
+          <textarea id="broadcast-text-input" class="input-text" rows="4" placeholder="Введите текст объявления для всех пользователей бота..."></textarea>
+        </div>
+        <button id="send-broadcast-btn" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
+          🚀 Запустить рассылку
+        </button>
+      </div>
+    </div>
+
   </div>
 
   <!-- Bottom Navigation -->
   <div class="bottom-nav">
     <div class="nav-item active" data-tab="tab-stats">
       <div class="nav-icon">📊</div>
-      <span>Статистика</span>
+      <span>Инфо</span>
     </div>
     <div class="nav-item" data-tab="tab-time">
       <div class="nav-icon">🕒</div>
@@ -677,9 +833,17 @@
       <div class="nav-icon">📝</div>
       <span>Био</span>
     </div>
+    <div class="nav-item" data-tab="tab-pair-bio">
+      <div class="nav-icon">👥</div>
+      <span>Пара</span>
+    </div>
     <div class="nav-item" data-tab="tab-settings">
       <div class="nav-icon">⚙️</div>
       <span>Аккаунт</span>
+    </div>
+    <div id="nav-admin" class="nav-item" data-tab="tab-admin" style="display: none;">
+      <div class="nav-icon">👑</div>
+      <span>Админ</span>
     </div>
   </div>
 
@@ -839,6 +1003,22 @@
         }
         renderBioLines(bio.lines || []);
 
+        // Рендер парного описания
+        renderPairBio(data.pair_bio);
+
+        // Проверка ранга администратора
+        const adminNav = document.getElementById("nav-admin");
+        if (u.is_admin) {
+          adminNav.style.display = "flex";
+          document.getElementById("admin-rank-badge").textContent = u.admin_rank || "Администратор";
+          if (u.tag_mode) {
+            document.getElementById("admin-tag-select").value = u.tag_mode;
+          }
+          loadAdminOverview();
+        } else {
+          adminNav.style.display = "none";
+        }
+
       } catch (err) {
         console.error("Ошибка загрузки данных:", err);
       }
@@ -947,6 +1127,336 @@
         if (d.ok) {
           showToast("Автоописание отключено");
           loadData();
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // ═══════════════ ПАРНОЕ ОПИСАНИЕ (PAIR BIO) ═══════════════
+
+    function renderPairBio(pairBio) {
+      const activeBox = document.getElementById("pair-active-container");
+      const createBox = document.getElementById("pair-create-container");
+
+      if (pairBio && (pairBio.status === "active" || pairBio.status === "pending")) {
+        activeBox.style.display = "block";
+        createBox.style.display = "none";
+
+        document.getElementById("pair-partner-name").textContent = "@" + (pairBio.partner_username || "").replace(/^@/, "");
+        document.getElementById("pair-interval-text").textContent = "каждые " + (pairBio.interval_minutes || 5) + " мин.";
+
+        const badge = document.getElementById("pair-status-badge");
+        if (pairBio.status === "active") {
+          badge.className = "status-pill";
+          badge.textContent = "Активно ✅";
+        } else {
+          badge.className = "status-pill offline";
+          badge.textContent = "Ожидание подтверждения ⏳";
+        }
+
+        const prevContainer = document.getElementById("pair-active-lines-preview");
+        prevContainer.innerHTML = "";
+        (pairBio.lines || []).forEach((l, idx) => {
+          const isMe = idx % 2 === 0;
+          const p = document.createElement("div");
+          p.style.padding = "4px 0";
+          p.innerHTML = `<span style="color: ${isMe ? 'var(--button-color)' : 'var(--accent)'}; font-weight: 600;">[${isMe ? 'Вы' : 'Друг'}]:</span> ${l.replace(/"/g, '&quot;')}`;
+          prevContainer.appendChild(p);
+        });
+
+      } else {
+        activeBox.style.display = "none";
+        createBox.style.display = "block";
+        if (document.querySelectorAll(".pair-line-input").length === 0) {
+          renderPairLines(["Мое парное био", "Парное био друга"]);
+        }
+      }
+    }
+
+    function renderPairLines(lines) {
+      const container = document.getElementById("pair-lines-container");
+      container.innerHTML = "";
+      if (!lines || lines.length === 0) {
+        lines = ["Моя первая строка", "Строка собеседника"];
+      }
+
+      lines.forEach((line, idx) => {
+        const isMe = idx % 2 === 0;
+        const row = document.createElement("div");
+        row.className = "line-item";
+        row.innerHTML = `
+          <span style="font-size: 11px; font-weight: 700; width: 44px; color: ${isMe ? 'var(--button-color)' : 'var(--accent)'};">
+            ${isMe ? 'Вы' : 'Друг'}
+          </span>
+          <input type="text" class="input-text pair-line-input" value="${line.replace(/"/g, '&quot;')}" placeholder="Строка ${idx + 1}">
+          <button type="button" class="line-del-btn" onclick="removePairLine(${idx})">✕</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function removePairLine(index) {
+      const inputs = document.querySelectorAll(".pair-line-input");
+      const lines = [];
+      inputs.forEach((inp, idx) => {
+        if (idx !== index) lines.push(inp.value);
+      });
+      renderPairLines(lines);
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    }
+
+    document.getElementById("add-pair-line-btn").addEventListener("click", () => {
+      const inputs = document.querySelectorAll(".pair-line-input");
+      const lines = Array.from(inputs).map(i => i.value);
+      const isMe = lines.length % 2 === 0;
+      lines.push((isMe ? "Строка для меня " : "Строка для друга ") + (lines.length + 1));
+      renderPairLines(lines);
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    });
+
+    document.getElementById("send-pair-invite-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const partner = document.getElementById("pair-friend-input").value.trim();
+      if (!partner) {
+        showToast("Укажите юзернейм собеседника!", "⚠️");
+        return;
+      }
+
+      const inputs = document.querySelectorAll(".pair-line-input");
+      const lines = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+      if (lines.length < 2) {
+        showToast("Нужно минимум 2 строки (для вас и друга)!", "⚠️");
+        return;
+      }
+
+      const body = {
+        partner_username: partner,
+        interval_minutes: parseInt(document.getElementById("pair-interval-select").value, 10),
+        lines: lines
+      };
+
+      try {
+        const res = await fetch("/api/settings/pair_bio", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body)
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(d.message || "Предложение отправлено!");
+          loadData();
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    document.getElementById("cancel-pair-bio-btn").addEventListener("click", async () => {
+      if (!confirm("Отключить парное описание?")) return;
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/action/cancel_pair_bio", {
+          method: "POST",
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Парное описание отключено");
+          loadData();
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+
+    // ═══════════════ АДМИН-ПАНЕЛЬ (ADMIN PANEL) ═══════════════
+
+    async function loadAdminOverview() {
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/admin/overview", {
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!d.ok) return;
+
+        if (d.current_tag_mode) {
+          document.getElementById("admin-tag-select").value = d.current_tag_mode;
+        }
+
+        const adminContainer = document.getElementById("admins-list-container");
+        adminContainer.innerHTML = "";
+        const admins = d.admins || [];
+        if (admins.length === 0) {
+          adminContainer.innerHTML = '<div style="font-size: 13px; color: var(--hint-color); padding: 4px 0;">Дополнительные администраторы не назначены.</div>';
+        } else {
+          admins.forEach(adm => {
+            const row = document.createElement("div");
+            row.className = "switch-row";
+            row.style.padding = "8px 0";
+            row.innerHTML = `
+              <div class="switch-info">
+                <div class="switch-title">@${adm.username || adm.user_id}</div>
+                <div class="switch-desc">ID: ${adm.user_id}</div>
+              </div>
+              <button class="line-del-btn" style="width: auto; height: 32px; padding: 0 10px; font-size: 12px;" onclick="deleteAdmin(${adm.user_id})">
+                Удалить
+              </button>
+            `;
+            adminContainer.appendChild(row);
+          });
+        }
+      } catch (err) {
+        console.error("Ошибка загрузки данных админки:", err);
+      }
+    }
+
+    document.getElementById("save-tag-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const tag = document.getElementById("admin-tag-select").value;
+      try {
+        const res = await fetch("/api/admin/tag_mode", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ tag_mode: tag })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(d.message || "Тег обновлен!");
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    document.getElementById("grant-feature-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const user = document.getElementById("grant-user-input").value.trim();
+      if (!user) {
+        showToast("Укажите юзернейм или ID пользователя!", "⚠️");
+        return;
+      }
+      const feature = document.getElementById("grant-feature-select").value;
+      const days = document.getElementById("grant-days-input").value.trim();
+
+      try {
+        const res = await fetch("/api/admin/grant_feature", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            username_or_id: user,
+            feature: feature,
+            days: days ? parseInt(days, 10) : null
+          })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(d.message || "Доступ выдан!");
+          document.getElementById("grant-user-input").value = "";
+        } else {
+          showToast(d.error || "Ошибка выдачи", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    document.getElementById("add-admin-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const user = document.getElementById("new-admin-input").value.trim();
+      if (!user) {
+        showToast("Укажите @username или ID!", "⚠️");
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/admin/add_admin", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ username_or_id: user })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(d.message || "Администратор добавлен!");
+          document.getElementById("new-admin-input").value = "";
+          loadAdminOverview();
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    async function deleteAdmin(userId) {
+      if (!confirm("Удалить пользователя из администраторов?")) return;
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/admin/del_admin", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ user_id: userId })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Администратор удален");
+          loadAdminOverview();
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    }
+
+    document.getElementById("send-broadcast-btn").addEventListener("click", async () => {
+      const text = document.getElementById("broadcast-text-input").value.trim();
+      if (!text) {
+        showToast("Введите текст рассылки!", "⚠️");
+        return;
+      }
+      if (!confirm("Отправить это сообщение ВСЕМ пользователям бота?")) return;
+
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/admin/broadcast", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ text: text })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast(d.message || "Рассылка завершена!");
+          document.getElementById("broadcast-text-input").value = "";
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
         }
       } catch (e) {
         showToast("Ошибка соединения", "❌");

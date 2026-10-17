@@ -74,16 +74,37 @@ STAGE_CONFIG = {
     },
 }
 
+# Соответствие русских названий ключам стадий
+TITLE_TO_KEY = {
+    "знакомство": "spark",
+    "общение": "dialogue",
+    "приятели": "buddies",
+    "дружба": "friendship",
+    "лучшие друзья": "best_friends",
+    "близкие души": "soulmates",
+    "истинная связь": "love",
+    "неразлучные": "inseparable",
+    "легендарная связь": "legend",
+    "легенда": "legend",
+}
+
 # Обратная совместимость для старых записей из БД
 LEGACY_MAP = {
     "marriage": "legend",
 }
 
 
-def normalize_stage(stage: str) -> str:
-    """Приводит старый ключ стадии к актуальному."""
-    stage = LEGACY_MAP.get(stage, stage)
-    return stage if stage in STAGE_CONFIG else "spark"
+def normalize_stage(stage: Optional[str]) -> str:
+    """Приводит старый ключ или русское название стадии к актуальному ключу."""
+    if not stage:
+        return "spark"
+    s_clean = str(stage).lower().strip()
+    for ch in ["🌱", "💬", "✨", "🤝", "🌟", "💫", "❤️", "💖", "👑"]:
+        s_clean = s_clean.replace(ch, "").strip()
+    if s_clean in TITLE_TO_KEY:
+        return TITLE_TO_KEY[s_clean]
+    s_clean = LEGACY_MAP.get(s_clean, s_clean)
+    return s_clean if s_clean in STAGE_CONFIG else "spark"
 
 
 def stage_name(stage: str) -> str:

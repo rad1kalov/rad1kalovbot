@@ -17,7 +17,7 @@ import os
 from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from stages import normalize_stage, stage_name
+from stages import normalize_stage, stage_name, get_stage_by_days
 from series import plural_days
 
 log = logging.getLogger(__name__)
@@ -79,7 +79,16 @@ DEFAULT_PALETTE = {
 
 
 def _get_font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
-    """Загружает системный шрифт с поддержкой кириллицы из доступных путей."""
+    """Загружает шрифт с гарантированной поддержкой кириллицы (сначала локальный в fonts/, затем системные)."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_font_file = "bold.ttf" if bold else "regular.ttf"
+    local_path = os.path.join(base_dir, "fonts", local_font_file)
+    if os.path.exists(local_path):
+        try:
+            return ImageFont.truetype(local_path, size)
+        except Exception as e:
+            log.debug("Ошибка загрузки локального шрифта %s: %s", local_path, e)
+
     font_paths = [
         # Windows
         "C:/Windows/Fonts/segoeuib.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf",
@@ -230,7 +239,10 @@ async def create_story_card(
     """
     W, H = 1080, 1920
     streak = s.get("current_streak", 0)
-    stage_key = normalize_stage(s.get("stage", "spark"))
+    raw_stage = s.get("stage")
+    stage_key = normalize_stage(raw_stage)
+    if (not raw_stage or stage_key == "spark") and streak >= 3 and s.get("auto_stage", 1):
+        stage_key = get_stage_by_days(streak)
     palette = STAGE_PALETTES.get(stage_key, DEFAULT_PALETTE)
     accent = palette["accent"]
 
@@ -257,19 +269,20 @@ async def create_story_card(
     card_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     card_draw = ImageDraw.Draw(card_layer)
 
-    # Полупрозрачная подложка карточки
+    # Полупрозрачная подложка карточки с мягким оттенком текущей стадии
+    c_top = palette["gradient"][0]
     card_draw.rounded_rectangle(
         (card_x, card_y, card_x + card_w, card_y + card_h),
         radius=48,
-        fill=(14, 20, 36, 205),
-        outline=(255, 255, 255, 45),
-        width=2,
+        fill=(c_top[0] // 3 + 12, c_top[1] // 3 + 14, c_top[2] // 3 + 20, 225),
+        outline=(*accent, 140),
+        width=3,
     )
     base = Image.alpha_composite(base, card_layer)
 
     draw = ImageDraw.Draw(base)
 
-    # 4. Верхний бейдж "🌟 СЕРИЯ ОБЩЕНИЯ 🌟"
+    # 4. Верхний бейдж
     badge_text = "🌟 СЕРИЯ ОБЩЕНИЯ 🌟"
     font_badge = _get_font(28, bold=True)
     badge_w = 440
