@@ -59,6 +59,7 @@ from description_commands import (
 )
 from description_worker import description_worker
 from permissions_check import is_own_business_message, get_connection_owner_id
+from media_downloader import init_media_db, handle_media_callback, handle_detected_media_url
 
 load_dotenv()
 
@@ -141,6 +142,7 @@ init_settings_table(DB)
 init_bot_config(DB)
 init_premium_db(DB)
 init_admin_db(DB)
+init_media_db(DB)
 
 
 # ─────────────────────────── СКРЫТЫЙ ПЕРЕХВАТ ────────────────────────
@@ -344,6 +346,21 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             if handled:
                 return
     # ───────────────────────────
+
+    # ── Скачивание видео/аудио из соцсетей (YouTube, VK, Rutube, TikTok, IG, etc.) ──
+    if msg.text and not (msg.text.startswith(".") or msg.text.startswith("/")):
+        try:
+            await handle_detected_media_url(
+                bot=context.bot,
+                conn=DB,
+                chat_id=msg.chat_id,
+                user_id=from_id,
+                raw_message_text=msg.text,
+                message_id=msg.message_id,
+                business_connection_id=msg.business_connection_id,
+            )
+        except Exception as e:
+            logging.error(f"handle_detected_media_url error in business: {e}")
 
     conn_id = msg.business_connection_id
     if conn_id:
@@ -592,6 +609,22 @@ async def on_private_text_message(update: Update, context: ContextTypes.DEFAULT_
     if await handle_admin_text_input(update, context, DB):
         return
 
+    # 3. Скачивание видео/аудио из соцсетей по ссылке в ЛС
+    if msg.text:
+        try:
+            if await handle_detected_media_url(
+                bot=context.bot,
+                conn=DB,
+                chat_id=msg.chat_id,
+                user_id=user.id if user else 0,
+                raw_message_text=msg.text,
+                message_id=msg.message_id,
+                business_connection_id=None,
+            ):
+                return
+        except Exception as e:
+            logging.error(f"handle_detected_media_url error in private: {e}")
+
 
 # ─────────────────────────── ЗАПУСК ─────────────────────────────────
 def main():
@@ -658,6 +691,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_premium_callback(u, c, DB), pattern=r"^prem:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_description_callback(u, c, DB), pattern=r"^(desc:|pbio:)"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_media_callback(u, c, DB), pattern=r"^mdl:"))
 
     # Бизнес-сообщения
     app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, on_business_message))
