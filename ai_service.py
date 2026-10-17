@@ -1,7 +1,7 @@
 # ai_service.py
 """
 Модуль интеграции с OpenAI API (модель gpt-6-astra):
-- Команда: .ai <запрос> или .аи <запрос> (также /ai)
+- Команда: .ai <запрос> (также /ai)
 - Лимиты:
   • Бесплатно: 2 ответа в календарный месяц
   • С Премиумом: безлимитные ответы
@@ -213,7 +213,7 @@ async def handle_ai_command(
     conn: sqlite3.Connection,
 ) -> bool:
     """
-    Обрабатывает команды .ai / .аи / /ai в любых чатах:
+    Обрабатывает команды .ai / /ai в любых чатах:
     - Бизнес-чаты
     - Личные сообщения с ботом
     Возвращает True, если сообщение было распознано как обращение к ИИ.
@@ -223,7 +223,7 @@ async def handle_ai_command(
         return False
 
     raw_text = msg.text.strip()
-    match = re.match(r"^[./](?:ai|аи)\b(?:\s+(.*))?", raw_text, re.IGNORECASE | re.DOTALL)
+    match = re.match(r"^[./]ai\b(?:\s+(.*))?", raw_text, re.IGNORECASE | re.DOTALL)
     if not match:
         return False
 
@@ -232,6 +232,15 @@ async def handle_ai_command(
     user_id = from_user.id if from_user else 0
     chat_id = msg.chat_id
     bc_id = getattr(msg, "business_connection_id", None)
+
+    # В бизнес-чатах команда разрешена ТОЛЬКО от владельца бизнес-аккаунта.
+    # Если бот подключен у обоих собеседников, бот второго собеседника не должен реагировать и тратить токены.
+    if bc_id:
+        from permissions_check import is_own_business_message
+        is_own = await is_own_business_message(context.bot, conn, msg)
+        if not is_own:
+            log.info("handle_ai_command: команда .ai проигнорирована: отправлена собеседником (%s)", user_id)
+            return False
 
     # Если текст запроса пуст, но сообщение отправлено в ответ на другое
     if not prompt and msg.reply_to_message:

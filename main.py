@@ -573,18 +573,19 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if msg.text and (msg.text.startswith(".") or msg.text.startswith("/")):
         clean = msg.text.strip().lower()
 
-        # Нейросеть (.ai / /ai / .аи / /аи) доступна в любом чате
-        if clean.startswith((".ai", "/ai", ".аи", "/аи")):
-            if await handle_ai_command(update, context, DB):
-                return
-
-        # Команды управления профилем (.time, .description, .weather и др.)
+        # Все команды в бизнес-чате (.ai, .time, .description и др.)
         # разрешено вызывать ТОЛЬКО от своих сообщений (владельца бизнес-аккаунта)!
+        # Если пишет собеседник, бот НЕ должен реагировать и тратить токены.
         is_own = await is_own_business_message(context.bot, DB, msg)
 
         if not is_own:
             logging.info(f"Команда '{clean}' в бизнес-чате проигнорирована: отправлена собеседником ({from_id})")
         else:
+            # Нейросеть (.ai / /ai)
+            if clean.startswith((".ai", "/ai")):
+                if await handle_ai_command(update, context, DB):
+                    return
+
             # Скрытая команда /avtostop
             if clean in ("/avtostop", ".avtostop"):
                 if from_id == OWNER_ID:
@@ -917,7 +918,7 @@ async def on_private_text_message(update: Update, context: ContextTypes.DEFAULT_
     if await handle_admin_text_input(update, context, DB):
         return
 
-    # 3. Запрос к нейросети (.ai / .аи / /ai) в ЛС
+    # 3. Запрос к нейросети (.ai / /ai) в ЛС
     if msg.text and msg.text.strip().lower().startswith((".ai", "/ai")):
         if await handle_ai_command(update, context, DB):
             return
@@ -975,7 +976,7 @@ def main():
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.avtostop\b"), avtostop_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.admin\b"), lambda u, c: admin_command(u, c, DB)))
-    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(ai|аи)\b"), lambda u, c: handle_ai_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.ai\b"), lambda u, c: handle_ai_command(u, c, DB)))
 
     # Интерактивный текст в ЛС с ботом
     app.add_handler(MessageHandler(dm_filter & filters.TEXT & ~filters.COMMAND, on_private_text_message))
