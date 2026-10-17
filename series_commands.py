@@ -21,7 +21,7 @@ from series_db import (
     set_stage,
     get_all_active_series,
 )
-from series_story import create_story_card
+from series_story import create_story_card, resolve_story_participants
 from series_styles import format_styled_streak_card
 from stages import (
     stage_name,
@@ -412,20 +412,15 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
     elif action == "story":
         await query.answer("📸 Генерирую открытку…")
 
-        # Определяем owner (user1) и собеседника (user2)
-        owner_id = get_series_owner_id(conn, s)
-        partner_name = s.get("last_user_name") or "Собеседник"
-
-        # Пытаемся определить user_id собеседника по chat_id
-        # В бизнес-чатах chat_id == user_id собеседника
-        partner_id = chat_id if chat_id != owner_id else 0
-
-        # Определяем имя владельца
-        try:
-            owner_chat = await context.bot.get_chat(owner_id)
-            owner_name = owner_chat.full_name or owner_chat.first_name or "Вы"
-        except Exception:
-            owner_name = user_name if user_id == owner_id else "Вы"
+        # Надёжно определяем владельца и собеседника чата
+        owner_id, owner_name, partner_id, partner_name = await resolve_story_participants(
+            bot=context.bot,
+            conn=conn,
+            chat_id=chat_id,
+            s=s,
+            current_user_id=user_id,
+            current_user_name=user_name,
+        )
 
         try:
             buf = await create_story_card(
@@ -438,7 +433,8 @@ async def handle_series_callback(update: Update, context: ContextTypes.DEFAULT_T
             )
             conn_id = s.get("business_connection_id")
 
-            back_keyboard = InlineKeyboardMarkup([
+            # В бизнес-сообщениях Telegram API запрещает inline-кнопки
+            back_keyboard = None if conn_id else InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"strk:main:{chat_id}")]
             ])
 

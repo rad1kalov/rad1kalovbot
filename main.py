@@ -22,7 +22,7 @@ from telegram.ext import (
 from series_db import init_series_db, get_series
 from series import process_message, build_summary
 from series_commands import handle_series_command, handle_series_callback
-from series_story import create_story_card
+from series_story import create_story_card, resolve_story_participants
 from series_worker import series_worker
 
 from tn_commands import handle_time_command, handle_time_callback, handle_weather_command, send_timezone_menu
@@ -468,26 +468,13 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 try:
                     s = get_series(DB, msg.chat_id)
                     if s:
-                        # Определяем владельца и собеседника
-                        owner_id_val = OWNER_ID
-                        bc_id = s.get("business_connection_id")
-                        if bc_id:
-                            from permissions_check import get_connection_owner_id as _get_owner
-                            try:
-                                resolved = await _get_owner(context.bot, DB, bc_id)
-                                if resolved:
-                                    owner_id_val = resolved
-                            except Exception:
-                                pass
-
-                        partner_name = s.get("last_user_name") or from_name
-                        partner_id = msg.chat_id if msg.chat_id != owner_id_val else 0
-
-                        try:
-                            owner_chat = await context.bot.get_chat(owner_id_val)
-                            owner_name = owner_chat.full_name or owner_chat.first_name or "Вы"
-                        except Exception:
-                            owner_name = "Вы"
+                        owner_id_val, owner_name, partner_id, partner_name = await resolve_story_participants(
+                            bot=context.bot,
+                            conn=DB,
+                            chat_id=msg.chat_id,
+                            s=s,
+                            current_user_name=from_name,
+                        )
 
                         buf = await create_story_card(
                             bot=context.bot,

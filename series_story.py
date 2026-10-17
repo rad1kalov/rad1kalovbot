@@ -14,6 +14,7 @@
 import io
 import logging
 import os
+import sqlite3
 from typing import Optional, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
@@ -21,6 +22,8 @@ from stages import normalize_stage, stage_name, get_stage_by_days
 from series import plural_days
 
 log = logging.getLogger(__name__)
+
+OWNER_ID = int(os.getenv("OWNER_ID", "8470104943"))
 
 # Цветовые палитры для градиентов по стадиям (Верх, Середина, Низ)
 STAGE_PALETTES = {
@@ -226,6 +229,115 @@ async def _download_user_avatar(bot, user_id: int, name: str, size: int) -> Imag
     return _make_fallback_avatar(name, size, c1, c2)
 
 
+async def resolve_story_participants(
+    bot,
+    conn: sqlite3.Connection,
+    chat_id: int,
+    s: Optional[dict] = None,
+    current_user_id: Optional[int] = None,
+    current_user_name: Optional[str] = None,
+) -> Tuple[int, str, int, str]:
+    """
+    Надёжно определяет двух участников для юбилейной карточки:
+    1. Владелец бизнес-аккаунта / серии (user1_id, user1_name)
+    2. Собеседник в чате (user2_id, user2_name)
+
+    Гарантирует, что никнеймы и аватары не продублируются (с двух сторон не будет одинаковых данных).
+    """
+    owner_id = 0
+    bc_id = s.get("business_connection_id") if s else None
+
+    # 1. Определяем ID владельца аккаунта
+    if bc_id:
+        try:
+            row = conn.execute("SELECT user_id FROM settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+            if row and row[0]:
+                owner_id = int(row[0])
+            if not owner_id:
+                row2 = conn.execute("SELECT user_id FROM bio_settings WHERE business_connection_id = ?", (bc_id,)).fetchone()
+                if row2 and row2[0]:
+                    owner_id = int(row2[0])
+        except Exception as e:
+            log.debug("Ошибка поиска владельца по bc_id %s: %s", bc_id, e)
+
+    if not owner_id:
+        owner_id = current_user_id or OWNER_ID
+
+    # 2. Определяем имя владельца
+    owner_name = ""
+    if owner_id:
+        try:
+            owner_chat = await bot.get_chat(owner_id)
+            owner_name = owner_chat.full_name or owner_chat.first_name or owner_chat.username or ""
+        except Exception:
+            pass
+
+    if not owner_name:
+        try:
+            row = conn.execute("SELECT first_name FROM settings WHERE user_id = ?", (owner_id,)).fetchone()
+            if row and row[0]:
+                owner_name = str(row[0])
+        except Exception:
+            pass
+
+    if not owner_name:
+        if current_user_id == owner_id and current_user_name:
+            owner_name = current_user_name
+        else:
+            owner_name = "Вы"
+
+    # 3. Определяем ID собеседника (user2)
+    partner_id = 0
+    if chat_id > 0 and chat_id != owner_id:
+        # В 1-на-1 бизнес-чатах Telegram chat_id совпадает с user_id собеседника
+        partner_id = chat_id
+    elif chat_id < 0:
+        # Если чат групповой, ищем собеседника из истории сообщений
+        try:
+            row = conn.execute("""
+                SELECT from_user_id FROM messages 
+                WHERE chat_id = ? AND from_user_id != ? AND from_user_id != 0 
+                ORDER BY message_id DESC LIMIT 1
+            """, (chat_id, owner_id)).fetchone()
+            if row and row[0]:
+                partner_id = int(row[0])
+        except Exception:
+            pass
+
+    # 4. Определяем имя собеседника
+    partner_name = ""
+    if partner_id and partner_id != owner_id:
+        try:
+            p_chat = await bot.get_chat(partner_id)
+            partner_name = p_chat.full_name or p_chat.first_name or p_chat.username or ""
+        except Exception:
+            pass
+
+    if not partner_name:
+        # Ищем имя собеседника из истории сообщений в БД
+        try:
+            row = conn.execute("""
+                SELECT from_user_name FROM messages 
+                WHERE chat_id = ? AND from_user_id != ? AND from_user_name IS NOT NULL AND from_user_name != ''
+                ORDER BY message_id DESC LIMIT 1
+            """, (chat_id, owner_id)).fetchone()
+            if row and row[0]:
+                partner_name = str(row[0])
+        except Exception:
+            pass
+
+    if not partner_name:
+        candidate = (s.get("last_user_name") or "").strip() if s else ""
+        if candidate and candidate.lower() != owner_name.lower():
+            partner_name = candidate
+
+    # 5. Защита от дублирования
+    if not partner_name or partner_name.strip().lower() == owner_name.strip().lower():
+        partner_name = "Собеседник"
+
+    return owner_id, owner_name, partner_id, partner_name
+
+
 async def create_story_card(
     bot,
     s: dict,
@@ -237,6 +349,13 @@ async def create_story_card(
     """
     Генерирует готовую графическую открытку 1080x1920 для Telegram Stories в кристальном качестве PNG.
     """
+    user1_name = (user1_name or "Пользователь").strip()
+    user2_name = (user2_name or "Собеседник").strip()
+    if user1_name and user2_name and user1_name.lower() == user2_name.lower():
+        user2_name = "Собеседник"
+    if user2_id == user1_id:
+        user2_id = 0
+
     W, H = 1080, 1920
     streak = s.get("current_streak", 0)
     raw_stage = s.get("stage")
