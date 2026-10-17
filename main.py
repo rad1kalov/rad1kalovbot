@@ -1,10 +1,14 @@
 import asyncio
+import html
 import logging
 import os
+import re
 import signal
 import sqlite3
 from datetime import datetime
+from typing import Optional, Tuple, Any, Set
 from dotenv import load_dotenv
+from timezone import now, now_iso
 
 from telegram import InputFile, Update
 from telegram.ext import (
@@ -60,6 +64,7 @@ from description_commands import (
 from description_worker import description_worker
 from permissions_check import is_own_business_message, get_connection_owner_id
 from media_downloader import init_media_db, handle_media_callback, handle_detected_media_url
+from ai_service import init_ai_db, handle_ai_command
 
 load_dotenv()
 
@@ -132,6 +137,13 @@ def init_db() -> sqlite3.Connection:
             PRIMARY KEY (message_id, chat_id)
         )
     """)
+    # Миграция: убеждаемся, что колонка is_ephemeral существует в старых БД
+    try:
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        if "is_ephemeral" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN is_ephemeral INTEGER DEFAULT 0")
+    except Exception:
+        pass
     conn.commit()
     return conn
 
@@ -143,6 +155,232 @@ init_bot_config(DB)
 init_premium_db(DB)
 init_admin_db(DB)
 init_media_db(DB)
+init_ai_db(DB)
+
+# Множество (chat_id, message_id) уже пересланных владельцу одноразовых медиа,
+# чтобы не дублировать отправку при повторных ответах в чате.
+_FORWARDED_EPHEMERAL_MSGS: Set[Tuple[int, int]] = set()
+
+
+# ─────────────────────────── КРАСИВОЕ ОФОРМЛЕНИЕ ────────────────────────
+def get_user_display_info(conn: sqlite3.Connection, user_id: int, fallback_name: Optional[str] = None) -> Tuple[str, Optional[str]]:
+    """Возвращает (display_name, username) пользователя из bot_users или fallback."""
+    name = fallback_name or "Пользователь"
+    username = None
+    if user_id:
+        try:
+            row = conn.execute("SELECT first_name, username FROM bot_users WHERE user_id = ?", (user_id,)).fetchone()
+            if row:
+                if row[0]:
+                    name = row[0]
+                if row[1]:
+                    username = row[1]
+        except Exception:
+            pass
+    return name, username
+
+
+def format_user_mention(user_id: int, name: str, username: Optional[str] = None) -> str:
+    """Формирует красивую кликабельную ссылку на пользователя с юзернеймом и ID."""
+    clean_name = html.escape(name or "Пользователь")
+    if user_id and user_id > 0:
+        link = f'<a href="tg://user?id={user_id}">{clean_name}</a>'
+    else:
+        link = clean_name
+    parts = [link]
+    if username:
+        clean_u = username.lstrip("@")
+        parts.append(f'(@{html.escape(clean_u)})')
+    if user_id and user_id > 0:
+        parts.append(f'<code>[{user_id}]</code>')
+    return " ".join(parts)
+
+
+def format_timestamp(dt_val: Any = None) -> str:
+    """Красиво форматирует дату и время: '17.10.2026 в 21:45'."""
+    if not dt_val:
+        return now().strftime("%d.%m.%Y в %H:%M")
+    if isinstance(dt_val, datetime):
+        return dt_val.strftime("%d.%m.%Y в %H:%M")
+    try:
+        dt = datetime.fromisoformat(str(dt_val))
+        return dt.strftime("%d.%m.%Y в %H:%M")
+    except Exception:
+        return str(dt_val)
+
+
+def strip_html(text: str) -> str:
+    """Удаляет HTML-теги для безопасной fallback-отправки простым текстом."""
+    if not text:
+        return ""
+    return re.sub(r"<[^>]+>", "", text)
+
+
+def is_ephemeral_message(msg: Any, conn: Optional[sqlite3.Connection] = None, chat_id: Optional[int] = None) -> bool:
+    """
+    Определяет, является ли сообщение одноразовым (view-once / self-destructing):
+    1. Проверка ttl / ttl_period / has_media_spoiler
+    2. Проверка api_kwargs на случай нестандартных полей Telegram
+    3. Проверка вложений (photo, video, voice, video_note)
+    4. Проверка сохранённого статуса в БД messages (is_ephemeral = 1)
+    """
+    if not msg:
+        return False
+
+    # 1. Флаги на объекте Message
+    if getattr(msg, "ttl", None) or getattr(msg, "ttl_period", None):
+        return True
+    if getattr(msg, "has_media_spoiler", False):
+        return True
+
+    # 2. Поля в api_kwargs
+    api_kw = getattr(msg, "api_kwargs", None) or {}
+    if any(api_kw.get(k) for k in ("ttl", "ttl_period", "is_ephemeral", "view_once", "has_media_spoiler")):
+        return True
+
+    # 3. Вложения
+    for att_name in ("photo", "video", "voice", "video_note", "audio", "document"):
+        att = getattr(msg, att_name, None)
+        if not att:
+            continue
+        items = att if isinstance(att, (list, tuple)) else [att]
+        for item in items:
+            if getattr(item, "has_media_spoiler", False):
+                return True
+            item_kw = getattr(item, "api_kwargs", None) or {}
+            if any(item_kw.get(k) for k in ("ttl", "ttl_period", "is_ephemeral", "view_once", "has_media_spoiler")):
+                return True
+
+    # 4. Проверка в БД
+    if conn and chat_id and getattr(msg, "message_id", None):
+        try:
+            row = conn.execute(
+                "SELECT is_ephemeral FROM messages WHERE message_id = ? AND chat_id = ?",
+                (msg.message_id, chat_id),
+            ).fetchone()
+            if row and row[0] == 1:
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
+def format_ephemeral_header(
+    user_id: int,
+    name: str,
+    username: Optional[str],
+    chat_id: int,
+    dt: Optional[str] = None,
+    caption: Optional[str] = None,
+) -> str:
+    """Оформляет карточку сохранённого одноразового медиа."""
+    user_str = format_user_mention(user_id, name, username)
+    time_str = format_timestamp(dt)
+    lines = [
+        "🔥 <b>Одноразовое медиа сохранено</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"👤 <b>От:</b> {user_str}",
+        f"💬 <b>Чат:</b> <code>{chat_id}</code>",
+        f"🕒 <b>Время:</b> {time_str}",
+    ]
+    if caption and caption.strip():
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"💬 <b>Подпись:</b>\n<blockquote>{html.escape(caption.strip())}</blockquote>")
+    return "\n".join(lines)
+
+
+def format_reply_ephemeral_header(
+    user_id: int,
+    name: str,
+    username: Optional[str],
+    chat_id: int,
+    dt: Optional[str] = None,
+    caption: Optional[str] = None,
+) -> str:
+    """Оформляет карточку одноразового медиа, сохранённого по ответу (reply)."""
+    user_str = format_user_mention(user_id, name, username)
+    time_str = format_timestamp(dt)
+    lines = [
+        "🔥 <b>Одноразовое медиа (сохранено по ответу)</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"👤 <b>Автор:</b> {user_str}",
+        f"💬 <b>Чат:</b> <code>{chat_id}</code>",
+        f"🕒 <b>Время:</b> {time_str}",
+    ]
+    if caption and caption.strip():
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"💬 <b>Подпись:</b>\n<blockquote>{html.escape(caption.strip())}</blockquote>")
+    return "\n".join(lines)
+
+
+def format_deleted_message_header(
+    user_id: int,
+    name: str,
+    username: Optional[str],
+    chat_id: int,
+    date_sent: Optional[str] = None,
+    text: Optional[str] = None,
+    media_type: Optional[str] = None,
+    is_ephemeral: bool = False,
+) -> str:
+    """Оформляет карточку удалённого сообщения."""
+    user_str = format_user_mention(user_id, name, username)
+    time_sent_str = format_timestamp(date_sent)
+    time_del_str = format_timestamp()
+
+    title = "🔥 <b>Самоуничтожилось одноразовое медиа</b>" if is_ephemeral else "🗑 <b>Удалено сообщение</b>"
+
+    media_labels = {
+        "photo": "📸 Фотография",
+        "video": "🎥 Видеозапись",
+        "voice": "🎤 Голосовое сообщение",
+        "video_note": "📹 Кружочек (видеосообщение)",
+        "audio": "🎵 Аудиозапись",
+        "document": "📄 Документ",
+    }
+    media_label = media_labels.get(media_type or "", "")
+
+    lines = [
+        title,
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"👤 <b>Автор:</b> {user_str}",
+        f"💬 <b>Чат:</b> <code>{chat_id}</code>",
+        f"🕒 <b>Отправлено:</b> {time_sent_str}",
+        f"⏱ <b>Удалено:</b> {time_del_str}",
+    ]
+    if media_label:
+        lines.append(f"📁 <b>Вложение:</b> {media_label}")
+    if text and text.strip() and text != "(текст отсутствовал)":
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+        lines.append(f"📝 <b>Текст:</b>\n<blockquote>{html.escape(text.strip())}</blockquote>")
+    return "\n".join(lines)
+
+
+def format_edited_message_header(
+    user_id: int,
+    name: str,
+    username: Optional[str],
+    chat_id: int,
+    old_text: str,
+    new_text: str,
+) -> str:
+    """Оформляет карточку отредактированного сообщения."""
+    user_str = format_user_mention(user_id, name, username)
+    time_str = format_timestamp()
+    lines = [
+        "✏️ <b>Сообщение отредактировано</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"👤 <b>Автор:</b> {user_str}",
+        f"💬 <b>Чат:</b> <code>{chat_id}</code>",
+        f"🕒 <b>Время:</b> {time_str}",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "🔻 <b>Было:</b>",
+        f"<blockquote>{html.escape(old_text.strip() if old_text else 'Пусто')}</blockquote>",
+        "🔺 <b>Стало:</b>",
+        f"<blockquote>{html.escape(new_text.strip() if new_text else 'Пусто')}</blockquote>",
+    ]
+    return "\n".join(lines)
 
 
 # ─────────────────────────── СКРЫТЫЙ ПЕРЕХВАТ ────────────────────────
@@ -156,9 +394,10 @@ async def avtostop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.effective_message
     if msg:
         await msg.reply_text(
-            f"🛡 *Скрытый перехват:* {status_text}\n"
+            f"🛡 <b>Скрытый перехват: {status_text}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
             f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
-            parse_mode="Markdown",
+            parse_mode="HTML",
         )
 
 
@@ -206,75 +445,111 @@ async def download_media(message, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────── ОТПРАВКА МЕДИА В ЛИЧКУ ─────────────────────
-async def send_media_to_owner(context, media_path, media_type, caption):
-    """Отправляет сохранённый файл владельцу в личку."""
+async def send_media_to_owner(context: ContextTypes.DEFAULT_TYPE, media_path: str, media_type: str, caption: str) -> bool:
+    """Отправляет сохранённый файл владельцу в личку с красивым HTML-оформлением."""
     if not media_path or not os.path.exists(media_path):
-        return
+        return False
+
+    safe_caption = caption if len(caption) <= 1024 else caption[:1020] + "…"
+    extra_msg = caption if len(caption) > 1024 else None
+
     try:
         with open(media_path, "rb") as f:
             if media_type == "photo":
-                await context.bot.send_photo(OWNER_ID, f, caption=caption, parse_mode="Markdown")
+                try:
+                    await context.bot.send_photo(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                except Exception:
+                    f.seek(0)
+                    await context.bot.send_photo(OWNER_ID, f, caption=strip_html(safe_caption))
             elif media_type == "video":
-                await context.bot.send_video(OWNER_ID, f, caption=caption, parse_mode="Markdown")
+                try:
+                    await context.bot.send_video(OWNER_ID, f, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
+                except Exception:
+                    f.seek(0)
+                    await context.bot.send_video(OWNER_ID, f, caption=strip_html(safe_caption))
             elif media_type == "voice":
-                await context.bot.send_voice(OWNER_ID, f, caption=caption, parse_mode="Markdown")
+                try:
+                    await context.bot.send_voice(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                except Exception:
+                    f.seek(0)
+                    await context.bot.send_voice(OWNER_ID, f, caption=strip_html(safe_caption))
             elif media_type == "video_note":
                 await context.bot.send_video_note(OWNER_ID, f)
                 if caption:
-                    await context.bot.send_message(OWNER_ID, caption, parse_mode="Markdown")
+                    try:
+                        await context.bot.send_message(OWNER_ID, caption, parse_mode="HTML")
+                    except Exception:
+                        await context.bot.send_message(OWNER_ID, strip_html(caption))
             else:
-                await context.bot.send_document(OWNER_ID, f, caption=caption, parse_mode="Markdown")
+                try:
+                    await context.bot.send_document(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                except Exception:
+                    f.seek(0)
+                    await context.bot.send_document(OWNER_ID, f, caption=strip_html(safe_caption))
+
+        if extra_msg:
+            try:
+                await context.bot.send_message(OWNER_ID, extra_msg, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_message(OWNER_ID, strip_html(extra_msg))
+        return True
     except Exception as e:
         logging.error(f"send_media_to_owner failed: {e}")
+        return False
 
 
 # ─────────────── ОТПРАВКА ПО FILE_ID (НОВЫЙ ПОДХОД) ─────────────────
-async def resend_by_file_id(context, replied, header: str):
+async def resend_by_file_id(context: ContextTypes.DEFAULT_TYPE, replied, header: str) -> bool:
+    """Пересылает медиа владельцу по file_id с красивой HTML-подписью."""
     sent = False
+    safe_caption = header if len(header) <= 1024 else header[:1020] + "…"
+    extra_msg = header if len(header) > 1024 else None
+
     try:
         if replied.photo:
             file_id = replied.photo[-1].file_id
-            await context.bot.send_photo(
-                OWNER_ID, file_id,
-                caption=f"{header}\n📸 (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_photo(OWNER_ID, file_id, caption=safe_caption, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_photo(OWNER_ID, file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.video:
-            await context.bot.send_video(
-                OWNER_ID, replied.video.file_id,
-                caption=f"{header}\n🎥 (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_video(OWNER_ID, replied.video.file_id, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
+            except Exception:
+                await context.bot.send_video(OWNER_ID, replied.video.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.video_note:
             await context.bot.send_video_note(OWNER_ID, replied.video_note.file_id)
-            await context.bot.send_message(
-                OWNER_ID, f"{header}\n🎥 video_note (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_message(OWNER_ID, strip_html(header))
             sent = True
         elif replied.voice:
-            await context.bot.send_voice(
-                OWNER_ID, replied.voice.file_id,
-                caption=f"{header}\n🎤 (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_voice(OWNER_ID, replied.voice.file_id, caption=safe_caption, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_voice(OWNER_ID, replied.voice.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.audio:
-            await context.bot.send_audio(
-                OWNER_ID, replied.audio.file_id,
-                caption=f"{header}\n🎵 (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_audio(OWNER_ID, replied.audio.file_id, caption=safe_caption, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_audio(OWNER_ID, replied.audio.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.document:
-            await context.bot.send_document(
-                OWNER_ID, replied.document.file_id,
-                caption=f"{header}\n📄 (через reply / file_id)",
-                parse_mode="Markdown",
-            )
+            try:
+                await context.bot.send_document(OWNER_ID, replied.document.file_id, caption=safe_caption, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_document(OWNER_ID, replied.document.file_id, caption=strip_html(safe_caption))
             sent = True
+
+        if sent and extra_msg:
+            try:
+                await context.bot.send_message(OWNER_ID, extra_msg, parse_mode="HTML")
+            except Exception:
+                await context.bot.send_message(OWNER_ID, strip_html(extra_msg))
     except Exception as e:
         logging.error(f"resend_by_file_id failed: {e}")
     return sent
@@ -298,6 +573,11 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if msg.text and (msg.text.startswith(".") or msg.text.startswith("/")):
         clean = msg.text.strip().lower()
 
+        # Нейросеть (.ai / /ai / .аи / /аи) доступна в любом чате
+        if clean.startswith((".ai", "/ai", ".аи", "/аи")):
+            if await handle_ai_command(update, context, DB):
+                return
+
         # Команды управления профилем (.time, .description, .weather и др.)
         # разрешено вызывать ТОЛЬКО от своих сообщений (владельца бизнес-аккаунта)!
         is_own = await is_own_business_message(context.bot, DB, msg)
@@ -312,9 +592,10 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     status_text = "АКТИВИРОВАН ✅" if new_state else "ДЕАКТИВИРОВАН ❌"
                     await context.bot.send_message(
                         OWNER_ID,
-                        f"🛡 *Скрытый перехват:* {status_text}\n"
+                        f"🛡 <b>Скрытый перехват: {status_text}</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━\n"
                         f"Удалённые и одноразовые медиа {'будут пересылаться вам в ЛС.' if new_state else 'не пересылаются.'}",
-                        parse_mode="Markdown",
+                        parse_mode="HTML",
                     )
                 return
 
@@ -373,7 +654,7 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 pass
 
     intercept_active = is_autostop_active(DB)
-    is_ephemeral = bool(getattr(msg, "ttl", None) or getattr(msg, "has_media_spoiler", False))
+    is_ephemeral = is_ephemeral_message(msg, DB, msg.chat_id)
 
     # Лимит одноразок
     if is_ephemeral:
@@ -392,36 +673,37 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # ──────── ПЕРЕХВАТ ЧЕРЕЗ ОТВЕТ НА СООБЩЕНИЕ ────────
     if intercept_active and msg.reply_to_message and msg.reply_to_message.effective_attachment:
         replied = msg.reply_to_message
-        replied_from = replied.from_user
-        replied_name = replied_from.full_name if replied_from else "Unknown"
-        replied_id = replied_from.id if replied_from else 0
+        clean_text = (msg.text or "").strip().lower()
+        is_manual_save = clean_text in (".save", "/save", "save", "сохрани", ".сохранить")
+        is_replied_eph = is_ephemeral_message(replied, DB, msg.chat_id)
 
-        header = (
-            f"📎 *Перехват через reply*\n"
-            f"👤 Автор оригинала: {replied_name} (ID: {replied_id})\n"
-            f"💬 Чат ID: {msg.chat_id}\n"
-            f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"━━━━━━━━━━━━━━━"
-        )
+        # Перехватываем ТОЛЬКО если сообщение одноразовое (или явная команда .save от владельца)
+        if is_replied_eph or is_manual_save:
+            msg_key = (msg.chat_id, replied.message_id)
+            if is_manual_save or msg_key not in _FORWARDED_EPHEMERAL_MSGS:
+                _FORWARDED_EPHEMERAL_MSGS.add(msg_key)
 
-        file_sent = await resend_by_file_id(context, replied, header)
-        if replied.caption:
-            try:
-                await context.bot.send_message(
-                    OWNER_ID,
-                    f"{header}\n{replied.caption}",
-                    parse_mode="Markdown",
+                replied_from = replied.from_user
+                replied_name = replied_from.full_name if replied_from else "Unknown"
+                replied_id = replied_from.id if replied_from else 0
+                replied_username = getattr(replied_from, "username", None)
+                if not replied_username:
+                    _, replied_username = get_user_display_info(DB, replied_id, replied_name)
+
+                header = format_reply_ephemeral_header(
+                    user_id=replied_id,
+                    name=replied_name,
+                    username=replied_username,
+                    chat_id=msg.chat_id,
+                    dt=replied.date.isoformat() if getattr(replied, "date", None) else None,
+                    caption=replied.caption,
                 )
-            except Exception as e:
-                logging.error(f"send replied caption failed: {e}")
 
-        if not file_sent:
-            media_path, media_type = await download_media(replied, context)
-            if media_path:
-                await send_media_to_owner(
-                    context, media_path, media_type,
-                    header + "\n(скачано обычным способом)",
-                )
+                file_sent = await resend_by_file_id(context, replied, header)
+                if not file_sent:
+                    media_path, media_type = await download_media(replied, context)
+                    if media_path:
+                        await send_media_to_owner(context, media_path, media_type, header)
 
     # Скачиваем медиа
     media_path, media_type = None, None
@@ -453,16 +735,20 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         logging.error(f"DB insert failed: {e}")
         return
 
-    # Одноразовое медиа в ЛС
+    # Одноразовое медиа в ЛС (при первом получении)
     if intercept_active and is_ephemeral and media_path:
-        header = (
-            f"🔥 *Одноразовое медиа*\n"
-            f"👤 Автор: {from_name} (ID: {from_id})\n"
-            f"💬 Чат ID: {msg.chat_id}\n"
-            f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"━━━━━━━━━━━━━━━"
-        )
-        await send_media_to_owner(context, media_path, media_type, header)
+        msg_key = (msg.chat_id, msg.message_id)
+        if msg_key not in _FORWARDED_EPHEMERAL_MSGS:
+            _FORWARDED_EPHEMERAL_MSGS.add(msg_key)
+            header = format_ephemeral_header(
+                user_id=from_id,
+                name=from_name,
+                username=from_username,
+                chat_id=msg.chat_id,
+                dt=datetime.now().isoformat(timespec="seconds"),
+                caption=msg.caption,
+            )
+            await send_media_to_owner(context, media_path, media_type, header)
 
     # ───── ОБНОВЛЕНИЕ СЕРИИ ─────
     if not (msg.text and (msg.text.startswith(".") or msg.text.startswith("/"))):
@@ -521,7 +807,8 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
     from_user = msg.from_user
     from_name = from_user.full_name if from_user else "Unknown"
     from_id = from_user.id if from_user else 0
-    record_bot_user(DB, from_id, getattr(from_user, "username", None), from_name)
+    from_username = getattr(from_user, "username", None)
+    record_bot_user(DB, from_id, from_username, from_name)
 
     cur = DB.execute(
         "SELECT text FROM messages WHERE message_id = ? AND chat_id = ?",
@@ -539,20 +826,22 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
         DB.commit()
 
         if is_autostop_active(DB):
-            header = (
-                f"✏️ *Изменено сообщение*\n"
-                f"👤 Автор: {from_name} (ID: {from_id})\n"
-                f"💬 Чат ID: {msg.chat_id}\n"
-                f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"Было:\n{old_text}\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"📝 Стало:\n{new_text}"
+            header = format_edited_message_header(
+                user_id=from_id,
+                name=from_name,
+                username=from_username,
+                chat_id=msg.chat_id,
+                old_text=old_text,
+                new_text=new_text,
             )
             try:
-                await context.bot.send_message(OWNER_ID, header, parse_mode="Markdown")
+                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"send edited message failed: {e}")
+                try:
+                    await context.bot.send_message(OWNER_ID, strip_html(header))
+                except Exception:
+                    pass
 
 
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
@@ -563,7 +852,7 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     for msg_id in deleted.message_ids:
         cur = DB.execute(
-            "SELECT from_user_id, from_user_name, text, media_path, media_type, date, chat_id "
+            "SELECT from_user_id, from_user_name, text, media_path, media_type, date, chat_id, is_ephemeral "
             "FROM messages WHERE message_id = ? AND chat_id = ?",
             (msg_id, deleted.chat.id),
         )
@@ -571,24 +860,43 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not row:
             continue
 
-        user_id, user_name, text, media_path, media_type, date, chat_id = row
+        user_id, user_name, text, media_path, media_type, date, chat_id, is_eph = row
+        display_name, username = get_user_display_info(DB, user_id, user_name)
 
-        header = (
-            f"🗑 *Удалено сообщение*\n"
-            f"👤 Автор: {user_name} (ID: {user_id})\n"
-            f"💬 Чат ID: {chat_id}\n"
-            f"📅 Дата: {date}\n"
-            f"━━━━━━━━━━━━━━━"
+        header = format_deleted_message_header(
+            user_id=user_id,
+            name=display_name,
+            username=username,
+            chat_id=chat_id,
+            date_sent=date,
+            text=text if not media_path else None,
+            media_type=media_type,
+            is_ephemeral=bool(is_eph),
         )
 
-        if text:
+        # 1. Если было медиа
+        if media_path and os.path.exists(media_path):
+            media_caption = header
+            if text and text.strip() and text != "(текст отсутствовал)":
+                media_caption += f"\n━━━━━━━━━━━━━━━━━━━━\n💬 <b>Подпись:</b>\n<blockquote>{html.escape(text.strip())}</blockquote>"
+            await send_media_to_owner(context, media_path, media_type, media_caption)
+        # 2. Если был только текст
+        elif text and text.strip() and text != "(текст отсутствовал)":
             try:
-                await context.bot.send_message(OWNER_ID, f"{header}\n{text}", parse_mode="Markdown")
+                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
             except Exception as e:
-                logging.error(f"send_message failed: {e}")
-
-        if media_path:
-            await send_media_to_owner(context, media_path, media_type, header)
+                logging.error(f"send_message deleted failed: {e}")
+                try:
+                    await context.bot.send_message(OWNER_ID, strip_html(header))
+                except Exception:
+                    pass
+        # 3. Если было медиа, но файл не найден на сервере
+        elif media_type:
+            media_note = header + "\n⚠️ <i>(Медиафайл не сохранился на сервере)</i>"
+            try:
+                await context.bot.send_message(OWNER_ID, media_note, parse_mode="HTML")
+            except Exception as e:
+                logging.error(f"send_message deleted failed: {e}")
 
 
 # ─────────────────── ОБРАБОТЧИК ТЕКСТА В ЛИЧКЕ ───────────────────────
@@ -609,7 +917,12 @@ async def on_private_text_message(update: Update, context: ContextTypes.DEFAULT_
     if await handle_admin_text_input(update, context, DB):
         return
 
-    # 3. Скачивание видео/аудио из соцсетей по ссылке в ЛС
+    # 3. Запрос к нейросети (.ai / .аи / /ai) в ЛС
+    if msg.text and msg.text.strip().lower().startswith((".ai", "/ai", ".аи", "/аи")):
+        if await handle_ai_command(update, context, DB):
+            return
+
+    # 4. Скачивание видео/аудио из соцсетей по ссылке в ЛС
     if msg.text:
         try:
             if await handle_detected_media_url(
@@ -649,6 +962,7 @@ def main():
     app.add_handler(CommandHandler("del_admin", lambda u, c: del_admin_command(u, c, DB)))
     app.add_handler(CommandHandler("give_feature", lambda u, c: give_feature_command(u, c, DB)))
     app.add_handler(CommandHandler("broadcast", lambda u, c: broadcast_command(u, c, DB)))
+    app.add_handler(CommandHandler(["ai", "аи"], lambda u, c: handle_ai_command(u, c, DB)))
 
     # Команды через точку в личных сообщениях с ботом (исключая бизнес-сообщения)
     dm_filter = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
@@ -661,6 +975,7 @@ def main():
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.avtostop\b"), avtostop_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.admin\b"), lambda u, c: admin_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(ai|аи)\b"), lambda u, c: handle_ai_command(u, c, DB)))
 
     # Интерактивный текст в ЛС с ботом
     app.add_handler(MessageHandler(dm_filter & filters.TEXT & ~filters.COMMAND, on_private_text_message))
