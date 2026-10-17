@@ -20,8 +20,11 @@ from admin_db import (
     grant_feature,
     revoke_feature,
     get_all_broadcast_users,
+    get_admin_tag_mode,
+    set_admin_tag_mode,
 )
 from premium_db import activate_premium, is_premium
+from bio_worker import apply_bio_for_connection
 import tn_db
 
 log = logging.getLogger(__name__)
@@ -66,6 +69,9 @@ def build_admin_panel(conn: sqlite3.Connection, user_id: int) -> tuple[str, Inli
         [
             InlineKeyboardButton("👥 Список администраторов", callback_data="adm:list_admins"),
             InlineKeyboardButton("⚙️ Лимит одноразок", callback_data="adm:ephem_menu"),
+        ],
+        [
+            InlineKeyboardButton("🏷 Тег в описании (био)", callback_data="adm:tag_menu"),
         ],
         [
             InlineKeyboardButton("❌ Закрыть панель", callback_data="adm:close"),
@@ -375,6 +381,105 @@ async def handle_admin_callback(update: Update, context: ContextTypes.DEFAULT_TY
         lim_str = "Безлимитно ♾" if val >= 999999 else f"{val} шт./день"
         await query.answer(f"Лимит установлен: {lim_str}", show_alert=True)
         await query.message.reply_text(f"✅ Базовый лимит сохранения одноразок обновлён: *{lim_str}*", parse_mode="Markdown")
+        return True
+
+    elif data == "adm:tag_menu":
+        await query.answer()
+        cur_mode = get_admin_tag_mode(conn, user.id)
+        mode_titles = {
+            "admin": "| admin @rad1kal_bot",
+            "dev": "| dev @rad1kal_bot",
+            "user": "| user @rad1kal_bot",
+            "off": "Выключен ❌",
+        }
+        status_label = mode_titles.get(cur_mode, "Выключен ❌")
+
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'admin' else ''}| admin @rad1kal_bot", callback_data="adm:set_tag:admin"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'dev' else ''}| dev @rad1kal_bot", callback_data="adm:set_tag:dev"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'user' else ''}| user @rad1kal_bot", callback_data="adm:set_tag:user"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'off' else ''}❌ Выключить тег", callback_data="adm:set_tag:off"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ В панель админа", callback_data="adm:back_panel"),
+            ],
+        ])
+
+        msg_text = (
+            "🏷 *Настройка персонального тега в описании:*\n\n"
+            "Вы можете выбрать выключаемый тег, который будет отображаться в конце вашего био профиля.\n\n"
+            f"Текущий режим: *{status_label}*\n\n"
+            "Выберите желаемый вариант ниже 👇"
+        )
+        try:
+            await query.edit_message_text(msg_text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await query.message.reply_text(msg_text, reply_markup=kb, parse_mode="Markdown")
+        return True
+
+    elif data.startswith("adm:set_tag:"):
+        new_mode = data.split(":")[-1]
+        set_admin_tag_mode(conn, user.id, new_mode)
+
+        # Немедленно обновляем био в Telegram Business аккаунте
+        bc_id = tn_db.get_user_bc_id(conn, user.id)
+        if bc_id:
+            await apply_bio_for_connection(context.bot, conn, bc_id, user.id)
+
+        mode_titles = {
+            "admin": "| admin @rad1kal_bot",
+            "dev": "| dev @rad1kal_bot",
+            "user": "| user @rad1kal_bot",
+            "off": "Выключен",
+        }
+        res_label = mode_titles.get(new_mode, new_mode)
+        await query.answer(f"Тег обновлен: {res_label}", show_alert=True)
+
+        # Перерисовываем меню тегов
+        cur_mode = new_mode
+        kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'admin' else ''}| admin @rad1kal_bot", callback_data="adm:set_tag:admin"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'dev' else ''}| dev @rad1kal_bot", callback_data="adm:set_tag:dev"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'user' else ''}| user @rad1kal_bot", callback_data="adm:set_tag:user"),
+            ],
+            [
+                InlineKeyboardButton(f"{'✅ ' if cur_mode == 'off' else ''}❌ Выключить тег", callback_data="adm:set_tag:off"),
+            ],
+            [
+                InlineKeyboardButton("⬅️ В панель админа", callback_data="adm:back_panel"),
+            ],
+        ])
+        msg_text = (
+            "🏷 *Настройка персонального тега в описании:*\n\n"
+            "Вы можете выбрать выключаемый тег, который будет отображаться в конце вашего био профиля.\n\n"
+            f"Текущий режим: *{res_label}*\n\n"
+            "Выберите желаемый вариант ниже 👇"
+        )
+        try:
+            await query.edit_message_text(msg_text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            pass
+        return True
+
+    elif data == "adm:back_panel":
+        await query.answer()
+        text, kb = build_admin_panel(conn, user.id)
+        try:
+            await query.edit_message_text(text, reply_markup=kb, parse_mode="Markdown")
+        except Exception:
+            await query.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
         return True
 
     return False

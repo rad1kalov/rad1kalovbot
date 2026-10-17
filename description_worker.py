@@ -57,7 +57,7 @@ async def rotate_single_descriptions(app, conn: sqlite3.Connection, sem: asyncio
                 target_line = lines[nxt_idx]
 
                 prem = is_premium(conn, user_id)
-                final_bio = format_bio_with_watermark(target_line, prem)
+                final_bio = format_bio_with_watermark(target_line, prem, conn=conn, user_id=user_id)
 
                 if bc_id:
                     ok = await set_business_account_bio(app.bot, bc_id, final_bio)
@@ -112,8 +112,8 @@ async def rotate_pair_bios(app, conn: sqlite3.Connection, sem: asyncio.Semaphore
                 prem1 = is_premium(conn, row["user_1"])
                 prem2 = is_premium(conn, row["user_2"])
 
-                bio1 = format_bio_with_watermark(line_1, prem1)
-                bio2 = format_bio_with_watermark(line_2, prem2)
+                bio1 = format_bio_with_watermark(line_1, prem1, conn=conn, user_id=row["user_1"])
+                bio2 = format_bio_with_watermark(line_2, prem2, conn=conn, user_id=row["user_2"])
 
                 bc_1 = tn_db.get_user_bc_id(conn, row["user_1"]) or row.get("bc_id_1")
                 bc_2 = tn_db.get_user_bc_id(conn, row["user_2"]) or row.get("bc_id_2")

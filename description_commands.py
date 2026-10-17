@@ -20,16 +20,33 @@ from admin_db import (
     resolve_user_id,
     record_bot_user,
 )
-from bio_worker import set_business_account_bio, apply_bio_for_connection, WATERMARK_SUFFIX, MAX_BIO_LENGTH
+from bio_worker import (
+    set_business_account_bio,
+    apply_bio_for_connection,
+    WATERMARK_SUFFIX,
+    MAX_BIO_LENGTH,
+    get_user_bio_tag,
+    strip_all_watermarks,
+)
 from premium_db import is_premium
 from timezone import now_iso
 
 log = logging.getLogger(__name__)
 
 
-def format_bio_with_watermark(bio_line: str, is_prem: bool) -> str:
-    """Форматирует строку описания с учетом водяного знака для бесплатных пользователей."""
-    clean = (bio_line or "").strip()
+def format_bio_with_watermark(bio_line: str, is_prem: bool, conn: Optional[sqlite3.Connection] = None, user_id: Optional[int] = None) -> str:
+    """Форматирует строку описания с учетом водяного знака / тега для пользователя."""
+    clean = strip_all_watermarks(bio_line or "").strip()
+
+    if conn is not None and user_id is not None:
+        target_tag, target_suffix = get_user_bio_tag(conn, user_id)
+        if not target_tag:
+            return clean[:MAX_BIO_LENGTH]
+        max_len = MAX_BIO_LENGTH - len(target_suffix)
+        trimmed = clean[:max_len]
+        return f"{trimmed}{target_suffix}" if trimmed else target_tag
+
+    # Fallback если не передан conn или user_id
     if is_prem:
         return clean[:MAX_BIO_LENGTH]
 
@@ -255,9 +272,9 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
         bc_2 = tn_db.get_user_bc_id(conn, pb["user_2"]) or pb["bc_id_2"]
 
         if bc_1 and line1:
-            await set_business_account_bio(context.bot, bc_1, format_bio_with_watermark(line1, prem1))
+            await set_business_account_bio(context.bot, bc_1, format_bio_with_watermark(line1, prem1, conn=conn, user_id=pb["user_1"]))
         if bc_2 and line2:
-            await set_business_account_bio(context.bot, bc_2, format_bio_with_watermark(line2, prem2))
+            await set_business_account_bio(context.bot, bc_2, format_bio_with_watermark(line2, prem2, conn=conn, user_id=pb["user_2"]))
 
         await query.answer("🎉 Парное описание активировано!", show_alert=True)
         await query.edit_message_text(
@@ -404,7 +421,7 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
 
         # Немедленно ставим первую строку
         prem = is_premium(conn, target_user_id)
-        target_bio = format_bio_with_watermark(lines[0], prem)
+        target_bio = format_bio_with_watermark(lines[0], prem, conn=conn, user_id=target_user_id)
         if bc_id:
             ok = await set_business_account_bio(context.bot, bc_id, target_bio)
             if ok:

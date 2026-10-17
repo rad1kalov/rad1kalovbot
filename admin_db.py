@@ -43,6 +43,14 @@ def init_admin_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # Настройки тегов в био для владельца и админов (admin / dev / user / off)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS admin_tag_settings (
+            user_id     INTEGER PRIMARY KEY,
+            tag_mode    TEXT DEFAULT 'off'
+        )
+    """)
+
     # Авто-ротация описаний
     conn.execute("""
         CREATE TABLE IF NOT EXISTS auto_descriptions (
@@ -174,6 +182,28 @@ def get_all_admins(conn: sqlite3.Connection) -> List[Dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM admins").fetchall()
     return [dict(r) for r in rows]
+
+
+def get_admin_tag_mode(conn: sqlite3.Connection, user_id: int) -> str:
+    """
+    Возвращает режим тега в описании для админа/владельца:
+    'off', 'admin', 'dev', 'user' (по умолчанию 'off' если админ/владелец).
+    """
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT tag_mode FROM admin_tag_settings WHERE user_id = ?", (user_id,)).fetchone()
+    if row and row["tag_mode"]:
+        return row["tag_mode"]
+    return "off"
+
+
+def set_admin_tag_mode(conn: sqlite3.Connection, user_id: int, tag_mode: str) -> None:
+    """Устанавливает режим тега в описании."""
+    conn.execute("""
+        INSERT INTO admin_tag_settings (user_id, tag_mode)
+        VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET tag_mode = excluded.tag_mode
+    """, (user_id, tag_mode))
+    conn.commit()
 
 
 # ─── Доступ к отдельным фичам ───
