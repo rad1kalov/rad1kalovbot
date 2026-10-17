@@ -542,6 +542,7 @@ def main():
     app.add_handler(CommandHandler("premium", lambda u, c: premium_command(u, c, DB)))
     app.add_handler(CommandHandler("give_premium", lambda u, c: give_premium_admin_command(u, c, DB)))
     app.add_handler(CommandHandler("description", lambda u, c: description_command(u, c, DB)))
+    app.add_handler(CommandHandler("time", lambda u, c: handle_time_command(u, c, DB)))
     app.add_handler(CommandHandler("weather", lambda u, c: handle_weather_command(u, c, DB)))
     app.add_handler(CommandHandler("admin", lambda u, c: admin_command(u, c, DB)))
     app.add_handler(CommandHandler("add_admin", lambda u, c: add_admin_command(u, c, DB)))

@@ -85,7 +85,8 @@ async def get_connection_owner_id(bot, conn: sqlite3.Connection, conn_id: Option
         bc = await bot.get_business_connection(conn_id)
         if bc and bc.user:
             owner_id = bc.user.id
-            conn.execute("UPDATE settings SET user_id = ? WHERE business_connection_id = ?", (owner_id, conn_id))
+            import tn_db
+            tn_db.upsert_user_connection(conn, owner_id, conn_id, bc.user.first_name or "", is_active=True)
             conn.execute("UPDATE bio_settings SET user_id = ? WHERE business_connection_id = ?", (owner_id, conn_id))
             conn.commit()
             return owner_id

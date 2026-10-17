@@ -111,8 +111,8 @@ async def on_business_connection_update(update, context, conn: sqlite3.Connectio
         log.info(f"Бизнес-подключение {bc_id} отключено пользователем {user_id}")
         return
 
-    # Сохраняем подключение в tn_db как активное
-    tn_db.save_first_name(conn, bc_id, first_name, user_id=user_id)
+    # Сохраняем подключение строго с привязкой к user_id как к первичному ключу
+    tn_db.upsert_user_connection(conn, user_id=user_id, bc_id=bc_id, first_name=first_name, is_active=True)
 
     # Пробуем получить текущее описание профиля пользователя
     existing_bio = ""
@@ -131,23 +131,34 @@ async def on_business_connection_update(update, context, conn: sqlite3.Connectio
 
 async def bio_worker(app, conn: sqlite3.Connection, interval_seconds: int = 300):
     """
-    Фоновый воркер: каждые 5 минут (300 секунд) проверяет описания
-    и поддерживает актуальный водяной знак у бесплатных пользователей.
+    Фоновый воркер: каждые 5 минут проверяет описания профилей
+    с пулом конкурентности Semaphore для поддержки тысяч пользователей.
     """
-    log.info("Воркер описания профиля (каждые 5 минут) запущен")
+    log.info("Воркер описания профиля запущен")
+    sem = asyncio.Semaphore(15)
+
+    async def _safe_apply(bc_id: str, uid: Optional[int]):
+        async with sem:
+            try:
+                await apply_bio_for_connection(app.bot, conn, bc_id, uid)
+            except Exception as e:
+                log.debug(f"Ошибка bio для {bc_id}: {e}")
 
     while True:
         try:
             connections = tn_db.get_all_connections(conn)
+            tasks = []
             for c in connections:
                 if c.get("is_active") == 0:
                     continue
-                bc_id = c["business_connection_id"]
-                b_settings = get_bio_settings(conn, bc_id)
-                uid = b_settings.get("user_id") if b_settings else c.get("user_id")
+                bc_id = c.get("business_connection_id")
+                if not bc_id:
+                    continue
+                uid = c.get("user_id")
+                tasks.append(_safe_apply(bc_id, uid))
 
-                if bc_id:
-                    await apply_bio_for_connection(app.bot, conn, bc_id, uid)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as e:
             log.error(f"bio_worker ошибка: {e}")

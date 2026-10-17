@@ -1,5 +1,9 @@
 # description_commands.py
-"""Команда /description, настройка авто-описаний и парных био с проверкой Правила 999."""
+"""
+Команда /description, настройка авто-описаний и парных био с проверкой Правила 999.
+Полная изоляция данных между пользователями, защита от действий собеседника,
+привязка через первичный ключ базы данных и user_id в callback_data.
+"""
 
 import json
 import logging
@@ -15,25 +19,20 @@ from admin_db import (
     has_feature_access,
     resolve_user_id,
     record_bot_user,
-    OWNER_ID,
 )
-from bio_worker import set_business_account_bio, WATERMARK_SUFFIX, MAX_BIO_LENGTH
+from bio_worker import set_business_account_bio, apply_bio_for_connection, WATERMARK_SUFFIX, MAX_BIO_LENGTH
 from premium_db import is_premium
 from timezone import now_iso
 
 log = logging.getLogger(__name__)
 
 
-def _get_user_bc_id(conn: sqlite3.Connection, user_id: int) -> Optional[str]:
-    return tn_db.get_user_bc_id(conn, user_id)
-
-
 def format_bio_with_watermark(bio_line: str, is_prem: bool) -> str:
     """Форматирует строку описания с учетом водяного знака для бесплатных пользователей."""
-    clean = bio_line.strip()
+    clean = (bio_line or "").strip()
     if is_prem:
         return clean[:MAX_BIO_LENGTH]
-    
+
     max_len = MAX_BIO_LENGTH - len(WATERMARK_SUFFIX)
     trimmed = clean[:max_len]
     return f"{trimmed}{WATERMARK_SUFFIX}" if trimmed else WATERMARK_SUFFIX.lstrip(" | ")
@@ -64,7 +63,7 @@ def build_description_menu(conn: sqlite3.Connection, user_id: int) -> Tuple[str,
         friend_name = pb["username_2"] if is_user1 else pb["username_1"]
         raw_lines = json.loads(pb.get("lines_json") or "[]")
         my_lines = [raw_lines[i] for i in range(len(raw_lines)) if (i % 2 == (0 if is_user1 else 1))]
-        
+
         lines.append("👫 *Активно парное описание:*")
         lines.append(f"• Друг: @{friend_name}")
         lines.append(f"• Интервал: каждые *{pb['interval_minutes']} мин.*")
@@ -94,16 +93,16 @@ def build_description_menu(conn: sqlite3.Connection, user_id: int) -> Tuple[str,
 
     keyboard = [
         [
-            InlineKeyboardButton("➕ Настроить строки описания", callback_data="desc:setup_single"),
+            InlineKeyboardButton("➕ Настроить строки описания", callback_data=f"desc:setup_single:{user_id}"),
         ],
         [
-            InlineKeyboardButton("👫 Установить парные описания", callback_data="desc:setup_pair"),
+            InlineKeyboardButton("👫 Установить парные описания", callback_data=f"desc:setup_pair:{user_id}"),
         ],
     ]
 
     if has_active:
         keyboard.append([
-            InlineKeyboardButton("❌ Отключить авто-описание", callback_data="desc:reset_all"),
+            InlineKeyboardButton("❌ Отключить авто-описание", callback_data=f"desc:reset_all:{user_id}"),
         ])
 
     keyboard.append([
@@ -121,23 +120,26 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not msg:
         return False
 
-    # Если команда отправлена в бизнес-чате, разрешаем её ТОЛЬКО владельцу аккаунта
+    # Защита: в бизнес-чатах команда разрешена ТОЛЬКО владельцу аккаунта
     if getattr(msg, "business_connection_id", None):
         is_own = await is_own_business_message(context.bot, conn, msg)
         if not is_own:
+            log.info(f"Игнорируем .description от собеседника ({msg.from_user.id if msg.from_user else 0})")
             return False
 
     sender = msg.from_user
     user_id = sender.id if sender else 0
+    if not user_id:
+        return False
+
     username = sender.username if sender else None
     first_name = sender.first_name if sender else None
-
     record_bot_user(conn, user_id, username, first_name)
 
     conn_id = getattr(msg, "business_connection_id", None)
-    bc_id = conn_id or _get_user_bc_id(conn, user_id)
+    bc_id = conn_id or tn_db.get_user_bc_id(conn, user_id)
 
-    # ───── ПРАВИЛО 999 ─────
+    # Проверка Правила 999
     ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
     if not ok:
         try:
@@ -150,10 +152,8 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception:
             await msg.reply_text(err_msg, parse_mode="Markdown")
         return True
-    # ────────────────────────
 
-    owner_id = (await get_connection_owner_id(context.bot, conn, bc_id)) or user_id
-    text_content, keyboard = build_description_menu(conn, owner_id)
+    text_content, keyboard = build_description_menu(conn, user_id)
 
     try:
         await context.bot.send_message(
@@ -177,24 +177,103 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
         return False
 
     user = query.from_user
-    user_id = user.id if user else 0
+    caller_id = user.id if user else 0
     username = user.username if user else None
     first_name = user.first_name if user else None
-    record_bot_user(conn, user_id, username, first_name)
-
-    bc_id = getattr(query.message, "business_connection_id", None) or _get_user_bc_id(conn, user_id)
-
-    if bc_id:
-        owner_id = await get_connection_owner_id(context.bot, conn, bc_id)
-        if owner_id and user_id != owner_id:
-            await query.answer("🔒 Настройки описания может изменять только владелец аккаунта!", show_alert=True)
-            return True
+    record_bot_user(conn, caller_id, username, first_name)
 
     data = query.data
+    parts = data.split(":")
 
-    # 1. Настройка одиночного авто-описания
-    if data == "desc:setup_single":
-        # Проверяем правило 999
+    # 1. Принятие / отклонение парного описания
+    if data.startswith("pbio:accept:"):
+        pair_id = int(parts[2])
+        conn.row_factory = sqlite3.Row
+        pb = conn.execute("SELECT * FROM pair_bios WHERE id = ?", (pair_id,)).fetchone()
+        if not pb or pb["status"] != "pending":
+            await query.answer("Заявка не найдена или уже обработана.", show_alert=True)
+            return True
+
+        if pb["user_2"] != caller_id:
+            await query.answer("🔒 Это приглашение предназначено не вам.", show_alert=True)
+            return True
+
+        conn.execute("UPDATE pair_bios SET status = 'active', last_update = ? WHERE id = ?", (now_iso(), pair_id))
+        conn.commit()
+
+        lines = json.loads(pb["lines_json"] or "[]")
+        line1 = lines[0] if len(lines) > 0 else ""
+        line2 = lines[1] if len(lines) > 1 else ""
+
+        prem1 = is_premium(conn, pb["user_1"])
+        prem2 = is_premium(conn, pb["user_2"])
+
+        bc_1 = tn_db.get_user_bc_id(conn, pb["user_1"]) or pb["bc_id_1"]
+        bc_2 = tn_db.get_user_bc_id(conn, pb["user_2"]) or pb["bc_id_2"]
+
+        if bc_1 and line1:
+            await set_business_account_bio(context.bot, bc_1, format_bio_with_watermark(line1, prem1))
+        if bc_2 and line2:
+            await set_business_account_bio(context.bot, bc_2, format_bio_with_watermark(line2, prem2))
+
+        await query.answer("🎉 Парное описание активировано!", show_alert=True)
+        await query.edit_message_text(
+            f"🎉 *Парное описание с @{pb['username_1']} успешно активировано!*\n\n"
+            f"Ваша текущая строка: `{line2}`\n"
+            f"Синхронная ротация запущена (каждые {pb['interval_minutes']} мин.).",
+            parse_mode="Markdown",
+        )
+
+        try:
+            await context.bot.send_message(
+                chat_id=pb["user_1"],
+                text=(
+                    f"🎉 *@ {pb['username_2']} принял предложение парного описания!*\n\n"
+                    f"Ваша строка: `{line1}`\n"
+                    f"Строка друга: `{line2}`\n"
+                    f"Синхронное обновление запущено!"
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception:
+            pass
+        return True
+
+    elif data.startswith("pbio:reject:"):
+        pair_id = int(parts[2])
+        conn.row_factory = sqlite3.Row
+        pb = conn.execute("SELECT * FROM pair_bios WHERE id = ?", (pair_id,)).fetchone()
+        if pb and pb["status"] == "pending":
+            if pb["user_2"] != caller_id:
+                await query.answer("🔒 Это приглашение предназначено не вам.", show_alert=True)
+                return True
+
+            conn.execute("UPDATE pair_bios SET status = 'rejected' WHERE id = ?", (pair_id,))
+            conn.commit()
+            await query.answer("Предложение отклонено.")
+            await query.edit_message_text("❌ Вы отклонили предложение парного описания.")
+            try:
+                await context.bot.send_message(
+                    chat_id=pb["user_1"],
+                    text=f"❌ Пользователь @{pb['username_2']} отклонил предложение парного описания.",
+                )
+            except Exception:
+                pass
+        return True
+
+    # 2. Проверка владельца для меню desc:
+    target_user_id = caller_id
+    if len(parts) >= 3 and parts[-1].isdigit():
+        target_user_id = int(parts[-1])
+        if caller_id != target_user_id:
+            await query.answer("🔒 Вы не можете изменять настройки чужого описания!", show_alert=True)
+            return True
+
+    action = parts[1]
+    bc_id = tn_db.get_user_bc_id(conn, target_user_id)
+
+    # Настройка одиночного авто-описания
+    if action == "setup_single":
         ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
         if not ok:
             await query.answer(RULE_999_NOTICE, show_alert=True)
@@ -202,6 +281,7 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
 
         await query.answer()
         context.user_data["desc_state"] = "waiting_single_lines"
+        context.user_data["desc_user_id"] = target_user_id
         context.user_data["desc_bc_id"] = bc_id
 
         prompt = (
@@ -215,14 +295,14 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
             "Отправьте сообщение в ответ сюда прямо сейчас 👇"
         )
         cancel_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Отмена", callback_data="desc:cancel")]
+            [InlineKeyboardButton("❌ Отмена", callback_data=f"desc:cancel:{target_user_id}")]
         ])
         await query.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode="Markdown")
         return True
 
-    # 2. Настройка парного описания
-    elif data == "desc:setup_pair":
-        if not has_feature_access(conn, user_id, "pair_bio"):
+    # Настройка парного описания
+    elif action == "setup_pair":
+        if not has_feature_access(conn, target_user_id, "pair_bio"):
             await query.answer("🔒 «Парные описания» доступны по Премиум подписке!", show_alert=True)
             return True
 
@@ -233,6 +313,7 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
 
         await query.answer()
         context.user_data["desc_state"] = "waiting_pair_username"
+        context.user_data["desc_user_id"] = target_user_id
         context.user_data["desc_bc_id"] = bc_id
 
         prompt = (
@@ -241,16 +322,16 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
             "2. Введите *@username друга* (например, `@alex_dev`):"
         )
         cancel_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Отмена", callback_data="desc:cancel")]
+            [InlineKeyboardButton("❌ Отмена", callback_data=f"desc:cancel:{target_user_id}")]
         ])
         await query.message.reply_text(prompt, reply_markup=cancel_kb, parse_mode="Markdown")
         return True
 
-    # 3. Выбор интервала одиночного описания
-    elif data.startswith("desc:int:"):
+    # Выбор интервала одиночного описания
+    elif action == "int":
         try:
-            interval = int(data.split(":")[-1])
-        except ValueError:
+            interval = int(parts[2])
+        except (ValueError, IndexError):
             interval = 5
 
         lines = context.user_data.get("pending_single_lines", [])
@@ -258,7 +339,6 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
             await query.answer("Ошибка: строки не найдены. Попробуйте снова.", show_alert=True)
             return True
 
-        # Сохраняем в БД
         conn.execute("""
             INSERT INTO auto_descriptions (user_id, business_conn_id, lines_json, interval_minutes, current_index, is_active, last_change)
             VALUES (?, ?, ?, ?, 0, 1, ?)
@@ -269,31 +349,32 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
                 current_index = 0,
                 is_active = 1,
                 last_change = excluded.last_change
-        """, (user_id, bc_id, json.dumps(lines, ensure_ascii=False), interval, now_iso()))
+        """, (target_user_id, bc_id, json.dumps(lines, ensure_ascii=False), interval, now_iso()))
         conn.commit()
 
         # Немедленно ставим первую строку
-        prem = is_premium(conn, user_id)
+        prem = is_premium(conn, target_user_id)
         target_bio = format_bio_with_watermark(lines[0], prem)
         if bc_id:
             await set_business_account_bio(context.bot, bc_id, target_bio)
 
         context.user_data.pop("pending_single_lines", None)
         context.user_data.pop("desc_state", None)
+        context.user_data.pop("desc_user_id", None)
 
         await query.answer("✅ Авто-описание активировано!", show_alert=True)
-        text_content, keyboard = build_description_menu(conn, user_id)
+        text_content, keyboard = build_description_menu(conn, target_user_id)
         try:
             await query.edit_message_text(text_content, reply_markup=keyboard, parse_mode="Markdown")
         except Exception:
             pass
         return True
 
-    # 4. Выбор интервала парного описания
-    elif data.startswith("desc:pair_int:"):
+    # Выбор интервала парного описания
+    elif action == "pair_int":
         try:
-            interval = int(data.split(":")[-1])
-        except ValueError:
+            interval = int(parts[2])
+        except (ValueError, IndexError):
             interval = 5
 
         lines = context.user_data.get("pending_pair_lines", [])
@@ -305,15 +386,13 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
             await query.answer("Ошибка данных. Начните настройку заново.", show_alert=True)
             return True
 
-        # Создаём заявку в pair_bios со статусом pending
         cur = conn.execute("""
             INSERT INTO pair_bios (user_1, user_2, username_1, username_2, bc_id_1, bc_id_2, lines_json, interval_minutes, current_step, status, last_update)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?)
-        """, (user_id, friend_id, username or str(user_id), friend_username, bc_id, friend_bc_id, json.dumps(lines, ensure_ascii=False), interval, now_iso()))
+        """, (target_user_id, friend_id, username or str(target_user_id), friend_username, bc_id, friend_bc_id, json.dumps(lines, ensure_ascii=False), interval, now_iso()))
         conn.commit()
         pair_id = cur.lastrowid
 
-        # Отправляем приглашение другу в ЛС бота
         odd_preview = "\n".join([f"• {lines[i]}" for i in range(0, len(lines), 2)])
         even_preview = "\n".join([f"• {lines[i]}" for i in range(1, len(lines), 2)])
 
@@ -351,93 +430,30 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
         context.user_data.pop("pending_pair_lines", None)
         context.user_data.pop("pair_friend_id", None)
         context.user_data.pop("desc_state", None)
+        context.user_data.pop("desc_user_id", None)
         return True
 
-    # 5. Принятие / Отклонение парного описания
-    elif data.startswith("pbio:accept:"):
-        pair_id = int(data.split(":")[-1])
-        conn.row_factory = sqlite3.Row
-        pb = conn.execute("SELECT * FROM pair_bios WHERE id = ?", (pair_id,)).fetchone()
-        if not pb or pb["status"] != "pending":
-            await query.answer("Заявка не найдена или уже обработана.", show_alert=True)
-            return True
-
-        if pb["user_2"] != user_id:
-            await query.answer("Это приглашение предназначено не вам.", show_alert=True)
-            return True
-
-        conn.execute("UPDATE pair_bios SET status = 'active', last_update = ? WHERE id = ?", (now_iso(), pair_id))
+    # Сброс описания строго для данного пользователя
+    elif action == "reset_all":
+        conn.execute("DELETE FROM auto_descriptions WHERE user_id = ?", (target_user_id,))
+        conn.execute("UPDATE pair_bios SET status = 'cancelled' WHERE (user_1 = ? OR user_2 = ?) AND status = 'active'", (target_user_id, target_user_id))
         conn.commit()
 
-        lines = json.loads(pb["lines_json"] or "[]")
-        # Синхронно устанавливаем: строка 1 (индекс 0) у User 1, строка 2 (индекс 1) у User 2
-        line1 = lines[0] if len(lines) > 0 else ""
-        line2 = lines[1] if len(lines) > 1 else ""
+        # Восстанавливаем стандартное био
+        if bc_id:
+            await apply_bio_for_connection(context.bot, conn, bc_id, target_user_id)
 
-        prem1 = is_premium(conn, pb["user_1"])
-        prem2 = is_premium(conn, pb["user_2"])
-
-        if pb["bc_id_1"] and line1:
-            await set_business_account_bio(context.bot, pb["bc_id_1"], format_bio_with_watermark(line1, prem1))
-        if pb["bc_id_2"] and line2:
-            await set_business_account_bio(context.bot, pb["bc_id_2"], format_bio_with_watermark(line2, prem2))
-
-        await query.answer("🎉 Парное описание активировано!", show_alert=True)
-        await query.edit_message_text(
-            f"🎉 *Парное описание с @{pb['username_1']} успешно активировано!*\n\n"
-            f"Ваша текущая строка: `{line2}`\n"
-            f"Синхронная ротация запущена (каждые {pb['interval_minutes']} мин.).",
-            parse_mode="Markdown",
-        )
-
-        try:
-            await context.bot.send_message(
-                chat_id=pb["user_1"],
-                text=(
-                    f"🎉 *@ {pb['username_2']} принял предложение парного описания!*\n\n"
-                    f"Ваша строка: `{line1}`\n"
-                    f"Строка друга: `{line2}`\n"
-                    f"Синхронное обновление запущено!"
-                ),
-                parse_mode="Markdown",
-            )
-        except Exception:
-            pass
-        return True
-
-    elif data.startswith("pbio:reject:"):
-        pair_id = int(data.split(":")[-1])
-        conn.row_factory = sqlite3.Row
-        pb = conn.execute("SELECT * FROM pair_bios WHERE id = ?", (pair_id,)).fetchone()
-        if pb and pb["status"] == "pending":
-            conn.execute("UPDATE pair_bios SET status = 'rejected' WHERE id = ?", (pair_id,))
-            conn.commit()
-            await query.answer("Предложение отклонено.")
-            await query.edit_message_text("❌ Вы отклонили предложение парного описания.")
-            try:
-                await context.bot.send_message(
-                    chat_id=pb["user_1"],
-                    text=f"❌ Пользователь @{pb['username_2']} отклонил предложение парного описания.",
-                )
-            except Exception:
-                pass
-        return True
-
-    # 6. Сброс описания
-    elif data == "desc:reset_all":
-        conn.execute("DELETE FROM auto_descriptions WHERE user_id = ?", (user_id,))
-        conn.execute("UPDATE pair_bios SET status = 'cancelled' WHERE (user_1 = ? OR user_2 = ?) AND status = 'active'", (user_id, user_id))
-        conn.commit()
         await query.answer("❌ Авто-описание отключено!", show_alert=True)
-        text_content, keyboard = build_description_menu(conn, user_id)
+        text_content, keyboard = build_description_menu(conn, target_user_id)
         try:
             await query.edit_message_text(text_content, reply_markup=keyboard, parse_mode="Markdown")
         except Exception:
             pass
         return True
 
-    elif data == "desc:cancel":
+    elif action == "cancel":
         context.user_data.pop("desc_state", None)
+        context.user_data.pop("desc_user_id", None)
         await query.answer("Отменено.")
         try:
             await query.message.delete()
@@ -448,10 +464,10 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
     return False
 
 
-# ─────────────────────── Обработка текстовых ответов в ЛС ───────────────────────
+# ─────────────────────── Ввод текста для описания ───────────────────────
 
 async def handle_description_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection) -> bool:
-    """Перехватывает шаги ввода строк описания или юзернейма друга."""
+    """Обрабатывает текстовые ответы пользователя при настройке описаний."""
     msg = update.message
     if not msg or not msg.text:
         return False
@@ -462,50 +478,79 @@ async def handle_description_text_input(update: Update, context: ContextTypes.DE
 
     user = msg.from_user
     user_id = user.id if user else 0
+    if not user_id:
+        return False
+
+    expected_uid = context.user_data.get("desc_user_id", user_id)
+    if user_id != expected_uid:
+        return False
+
     text = msg.text.strip()
 
-    # Шаг 1: ввод строк одиночного описания
+    # 1. Ожидание строк одиночного авто-описания
     if state == "waiting_single_lines":
-        lines = [l.strip() for l in text.split(";") if l.strip()]
-        if not lines:
-            await msg.reply_text("⚠️ Введите хотя бы одну строку! Пример: `Строка1;\nСтрока2`", parse_mode="Markdown")
+        raw_parts = [p.strip() for p in text.split(";") if p.strip()]
+        if not raw_parts:
+            await msg.reply_text(
+                "⚠️ Не найдено строк! Разделяйте строки точкой с запятой `;`.\nПопробуйте ещё раз:"
+            )
             return True
 
-        context.user_data["pending_single_lines"] = lines
-        context.user_data["desc_state"] = None
-
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏱ 5 минут", callback_data="desc:int:5"), InlineKeyboardButton("⏱ 15 минут", callback_data="desc:int:15")],
-            [InlineKeyboardButton("⏱ 30 минут", callback_data="desc:int:30"), InlineKeyboardButton("⏱ 1 час", callback_data="desc:int:60")],
-            [InlineKeyboardButton("⏱ 3 часа", callback_data="desc:int:180"), InlineKeyboardButton("⏱ 6 часов", callback_data="desc:int:360")],
-        ])
-
-        preview = "\n".join([f"{i}. {l}" for i, l in enumerate(lines, 1)])
-        await msg.reply_text(
-            f"✅ *Строки получены ({len(lines)} шт.):*\n\n{preview}\n\n"
-            "⏱ *Выберите интервал смены описания кнопками ниже:*",
-            reply_markup=kb,
-            parse_mode="Markdown",
-        )
-        return True
-
-    # Шаг 2: ввод юзернейма друга для парного био
-    elif state == "waiting_pair_username":
-        clean_user = text.lstrip("@").strip().lower()
-        friend_id = resolve_user_id(conn, clean_user)
-        if not friend_id:
+        if len(raw_parts) < 2:
             await msg.reply_text(
-                f"⚠️ Пользователь @{clean_user} не найден в базе бота.\n\n"
-                "Друг должен сначала написать в бота /start и подключить Telegram Business!",
+                "⚠️ Для авто-ротации укажите минимум *2 строки*, разделённые `;`.\nПопробуйте ещё раз:",
                 parse_mode="Markdown",
             )
             return True
 
-        friend_bc_id = _get_user_bc_id(conn, friend_id)
+        context.user_data["pending_single_lines"] = raw_parts
+        context.user_data["desc_state"] = None
+
+        preview = "\n".join([f"{i}. {line}" for i, line in enumerate(raw_parts, 1)])
+        interval_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⏱ Каждые 1 мин.", callback_data=f"desc:int:1:{user_id}"),
+                InlineKeyboardButton("⏱ Каждые 5 мин.", callback_data=f"desc:int:5:{user_id}"),
+            ],
+            [
+                InlineKeyboardButton("⏱ Каждые 15 мин.", callback_data=f"desc:int:15:{user_id}"),
+                InlineKeyboardButton("⏱ Каждые 30 мин.", callback_data=f"desc:int:30:{user_id}"),
+            ],
+            [
+                InlineKeyboardButton("⏱ Раз в 1 час", callback_data=f"desc:int:60:{user_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"desc:cancel:{user_id}"),
+            ]
+        ])
+
+        await msg.reply_text(
+            f"✅ *Строки успешно приняты ({len(raw_parts)} шт.):*\n\n{preview}\n\n"
+            "Выберите интервал смены описания 👇",
+            reply_markup=interval_kb,
+            parse_mode="Markdown",
+        )
+        return True
+
+    # 2. Ожидание юзернейма друга для парного био
+    elif state == "waiting_pair_username":
+        clean_user = text.lstrip("@").strip()
+        friend_id = resolve_user_id(conn, clean_user)
+        if not friend_id:
+            await msg.reply_text(
+                f"❌ Пользователь `@{clean_user}` не найден в базе бота.\n\n"
+                f"Друг должен сначала написать боту команду /start и подключить Telegram Business!",
+                parse_mode="Markdown",
+            )
+            return True
+
+        if friend_id == user_id:
+            await msg.reply_text("⚠️ Нельзя установить парное описание с самим собой!")
+            return True
+
+        friend_bc_id = tn_db.get_user_bc_id(conn, friend_id)
         if not friend_bc_id:
             await msg.reply_text(
-                f"⚠️ Пользователь @{clean_user} ещё не подключил бота к Telegram Business.\n"
-                "Попросите друга подключить бота в настройках Telegram для бизнеса!",
+                f"⚠️ У пользователя `@{clean_user}` не подключен Telegram Business!\n"
+                f"Попросите друга подключить бота в *Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
                 parse_mode="Markdown",
             )
             return True
@@ -516,46 +561,66 @@ async def handle_description_text_input(update: Update, context: ContextTypes.DE
         context.user_data["desc_state"] = "waiting_pair_lines"
 
         await msg.reply_text(
-            f"✅ Друг *@ {clean_user}* найден!\n\n"
-            "✍️ *Отправьте строки для парного описания через `;` (точку с запятой):*\n"
-            "Нечётные строки (1, 3, 5...) будут у вас, а чётные (2, 4, 6...) — у друга!\n\n"
-            "Пример:\n"
-            "```\n"
-            "Моё сердце занято;\n"
-            "Её сердце занято;\n"
-            "Люблю её;\n"
-            "Люблю его\n"
-            "```",
+            f"✅ Друг `@{clean_user}` найден!\n\n"
+            f"Теперь отправьте строки через точку с запятой `;`.\n"
+            f"❗️ *Важно:* нечётные строки (1, 3, 5...) будут у вас, а чётные (2, 4, 6...) — у друга!\n\n"
+            f"Пример:\n"
+            f"```\n"
+            f"я люблю её; я люблю его;\n"
+            f"мой зайчик; моя зайка\n"
+            f"```",
             parse_mode="Markdown",
         )
         return True
 
-    # Шаг 3: ввод строк парного био
+    # 3. Ожидание строк для парного био
     elif state == "waiting_pair_lines":
-        lines = [l.strip() for l in text.split(";") if l.strip()]
-        if len(lines) < 2:
-            await msg.reply_text("⚠️ Для парного описания нужно минимум 2 строки (для вас и для друга) через `;`!", parse_mode="Markdown")
+        raw_parts = [p.strip() for p in text.split(";") if p.strip()]
+        if len(raw_parts) < 2:
+            await msg.reply_text(
+                "⚠️ Укажите минимум 2 парные строки через `;`!\nПопробуйте ещё раз:",
+                parse_mode="Markdown",
+            )
             return True
 
-        context.user_data["pending_pair_lines"] = lines
+        if len(raw_parts) % 2 != 0:
+            await msg.reply_text(
+                f"⚠️ Количество строк должно быть чётным (для двоих)! Вы ввели: {len(raw_parts)}.\n"
+                f"Добавьте ещё одну строку через `;`:",
+                parse_mode="Markdown",
+            )
+            return True
+
+        context.user_data["pending_pair_lines"] = raw_parts
         context.user_data["desc_state"] = None
 
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏱ 5 минут", callback_data="desc:pair_int:5"), InlineKeyboardButton("⏱ 15 минут", callback_data="desc:pair_int:15")],
-            [InlineKeyboardButton("⏱ 30 минут", callback_data="desc:pair_int:30"), InlineKeyboardButton("⏱ 1 час", callback_data="desc:pair_int:60")],
-            [InlineKeyboardButton("⏱ 3 часа", callback_data="desc:pair_int:180")],
+        user1_lines = [raw_parts[i] for i in range(0, len(raw_parts), 2)]
+        user2_lines = [raw_parts[i] for i in range(1, len(raw_parts), 2)]
+
+        preview1 = "\n".join([f"• {l}" for l in user1_lines])
+        preview2 = "\n".join([f"• {l}" for l in user2_lines])
+
+        interval_kb = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⏱ Каждые 1 мин.", callback_data=f"desc:pair_int:1:{user_id}"),
+                InlineKeyboardButton("⏱ Каждые 5 мин.", callback_data=f"desc:pair_int:5:{user_id}"),
+            ],
+            [
+                InlineKeyboardButton("⏱ Каждые 15 мин.", callback_data=f"desc:pair_int:15:{user_id}"),
+                InlineKeyboardButton("⏱ Каждые 30 мин.", callback_data=f"desc:pair_int:30:{user_id}"),
+            ],
+            [
+                InlineKeyboardButton("⏱ Раз в 1 час", callback_data=f"desc:pair_int:60:{user_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data=f"desc:cancel:{user_id}"),
+            ]
         ])
 
-        friend_name = context.user_data.get("pair_friend_username", "друга")
-        odd_preview = "\n".join([f"• {lines[i]}" for i in range(0, len(lines), 2)])
-        even_preview = "\n".join([f"• {lines[i]}" for i in range(1, len(lines), 2)])
-
         await msg.reply_text(
-            f"✅ *Строки для парного описания приняты!*\n\n"
-            f"👤 *У вас (нечётные):*\n{odd_preview}\n\n"
-            f"👥 *У @{friend_name} (чётные):*\n{even_preview}\n\n"
-            "⏱ *Выберите интервал смены описания:*",
-            reply_markup=kb,
+            f"👫 *Парные строки приняты!*\n\n"
+            f"👤 *Ваши строки:*\n{preview1}\n\n"
+            f"👥 *Строки @{context.user_data.get('pair_friend_username')}:*\n{preview2}\n\n"
+            f"Выберите интервал синхронной смены описания 👇",
+            reply_markup=interval_kb,
             parse_mode="Markdown",
         )
         return True
