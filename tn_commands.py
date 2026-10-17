@@ -89,9 +89,6 @@ def build_timezone_keyboard(conn: sqlite3.Connection, user_id: int) -> InlineKey
         InlineKeyboardButton("🔄 Обновить в профиле сейчас", callback_data=f"tz:refresh:{user_id}")
     ])
     keyboard.append([
-        InlineKeyboardButton("📱 Открыть в Mini App", web_app=WebAppInfo(url="https://bot.rad1kal.fun"))
-    ])
-    keyboard.append([
         InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")
     ])
 
@@ -171,26 +168,56 @@ async def send_timezone_menu(
     # Находим business_connection_id строго для этого пользователя
     bc_id = tn_db.get_user_bc_id(conn, user_id)
     if not bc_id:
-        await msg.reply_text(
-            "⚠️ *У вас не подключен Telegram Business!*\n\n"
-            "Для настройки времени подключите бота:\n"
-            "*Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
-            parse_mode="Markdown",
+        not_conn_text = (
+            "⚠️ *Telegram Business не обнаружен!*\n\n"
+            "Если бот уже добавлен в чат-боты вашего аккаунта:\n"
+            "1. Перейдите в *Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.\n"
+            "2. Выключите тумблер бота и включите обратно (чтобы Telegram обновил статус подключения).\n"
+            "3. Или просто отправьте любое сообщение в любой ваш бизнес-чат.\n\n"
+            "После этого нажмите кнопку «Проверить снова» 👇"
         )
+        retry_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Проверить снова", callback_data="time:open_start")],
+            [InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")],
+        ])
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=not_conn_text,
+                reply_markup=retry_kb,
+                parse_mode="Markdown",
+            )
+        else:
+            await msg.reply_text(
+                not_conn_text,
+                reply_markup=retry_kb,
+                parse_mode="Markdown",
+            )
         return True
 
     # Проверка прав доступа в Telegram Business (Правило 999)
     ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
     if not ok:
-        try:
-            await context.bot.send_message(
-                chat_id=msg.chat_id,
+        retry_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Повторить проверку", callback_data="time:open_start")],
+            [InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")],
+        ])
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
                 text=err_msg,
-                business_connection_id=getattr(msg, "business_connection_id", None),
+                reply_markup=retry_kb,
                 parse_mode="Markdown",
             )
-        except Exception:
-            await msg.reply_text(err_msg, parse_mode="Markdown")
+        else:
+            try:
+                await context.bot.send_message(
+                    chat_id=msg.chat_id,
+                    text=err_msg,
+                    reply_markup=retry_kb,
+                    business_connection_id=getattr(msg, "business_connection_id", None),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                await msg.reply_text(err_msg, reply_markup=retry_kb, parse_mode="Markdown")
         return True
 
     # Сохраняем имя владельца, если его ещё нет

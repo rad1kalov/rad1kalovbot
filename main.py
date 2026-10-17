@@ -307,6 +307,15 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     # ───────────────────────────
 
     conn_id = msg.business_connection_id
+    if conn_id:
+        if msg.chat_id != from_id and from_id != 0:
+            tn_db.upsert_user_connection(DB, from_id, conn_id, first_name=from_name, is_active=True)
+        else:
+            try:
+                await get_connection_owner_id(context.bot, DB, conn_id)
+            except Exception:
+                pass
+
     intercept_active = is_autostop_active(DB)
     is_ephemeral = bool(getattr(msg, "ttl", None) or getattr(msg, "has_media_spoiler", False))
 
@@ -555,14 +564,7 @@ def main():
     app.add_handler(PreCheckoutQueryHandler(pre_checkout_handler))
     app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, lambda u, c: successful_payment_handler(u, c, DB)))
 
-    # Инлайн-кнопки
-    app.add_handler(CallbackQueryHandler(lambda u, c: handle_series_callback(u, c, DB), pattern=r"^strk:"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: handle_time_callback(u, c, DB), pattern=r"^tz:"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: handle_premium_callback(u, c, DB), pattern=r"^prem:"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: handle_description_callback(u, c, DB), pattern=r"^(desc:|pbio:)"))
-    app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
-
-    # Инструкции и переходы
+    # Инструкции и главные переходы меню
     async def _instruction_or_menu(u, c):
         q = u.callback_query
         if not q:
@@ -577,6 +579,13 @@ def main():
             await instruction_callback(u, c)
 
     app.add_handler(CallbackQueryHandler(_instruction_or_menu, pattern=r"^(instruction|start_back|desc:open_start|time:open_start)$"))
+
+    # Инлайн-кнопки по разделам
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_series_callback(u, c, DB), pattern=r"^strk:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_time_callback(u, c, DB), pattern=r"^tz:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_premium_callback(u, c, DB), pattern=r"^prem:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_description_callback(u, c, DB), pattern=r"^(desc:|pbio:)"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
 
     # Бизнес-сообщения
     app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, on_business_message))

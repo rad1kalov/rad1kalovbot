@@ -203,9 +203,18 @@ async def give_feature_command(update: Update, context: ContextTypes.DEFAULT_TYP
             pass
 
     if not target_id:
+        clean_un = target_str.lstrip("@").lower()
+        conn.execute("""
+            INSERT INTO pending_grants (username, feature, days)
+            VALUES (?, ?, ?)
+            ON CONFLICT(username, feature) DO UPDATE SET days = excluded.days
+        """, (clean_un, feature, days))
+        conn.commit()
+        feature_title = FEATURE_NAMES.get(feature, f"«{feature}»")
+        days_label = "Бессрочно (навсегда) ♾" if days <= 0 else f"{days} дней"
         await update.effective_message.reply_text(
-            f"❌ Пользователь `{target_str}` не найден в базе данных.\n"
-            "Пользователь должен хотя бы раз запустить бота!",
+            f"⏳ Пользователь `@{clean_un}` пока не запускал бота.\n\n"
+            f"✅ Выдача {feature_title} ({days_label}) сохранена в очередь и активируется **автоматически**, как только пользователь перейдет в бота или напишет любое сообщение!",
             parse_mode="Markdown",
         )
         return

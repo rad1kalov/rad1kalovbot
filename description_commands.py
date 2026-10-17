@@ -98,9 +98,6 @@ def build_description_menu(conn: sqlite3.Connection, user_id: int) -> Tuple[str,
         [
             InlineKeyboardButton("👫 Установить парные описания", callback_data=f"desc:setup_pair:{user_id}"),
         ],
-        [
-            InlineKeyboardButton("📱 Открыть в Mini App", web_app=WebAppInfo(url="https://bot.rad1kal.fun")),
-        ],
     ]
 
     if has_active:
@@ -129,7 +126,7 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         log.info("Команда .description проигнорирована: вызвана вне личных сообщений с ботом")
         return False
 
-    sender = msg.from_user
+    sender = update.effective_user or (msg.from_user if msg else None)
     user_id = sender.id if sender else 0
     if not user_id:
         return False
@@ -139,31 +136,76 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     record_bot_user(conn, user_id, username, first_name)
 
     bc_id = tn_db.get_user_bc_id(conn, user_id)
-
-    # Проверка подключения
-    ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
-    if not ok:
-        try:
-            await context.bot.send_message(
-                chat_id=msg.chat_id,
-                text=err_msg,
-                business_connection_id=getattr(msg, "business_connection_id", None),
+    if not bc_id:
+        not_conn_text = (
+            "⚠️ *Telegram Business не обнаружен!*\n\n"
+            "Если бот уже добавлен в чат-боты вашего аккаунта:\n"
+            "1. Перейдите в *Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.\n"
+            "2. Выключите тумблер бота и включите обратно (чтобы Telegram обновил статус подключения).\n"
+            "3. Или просто отправьте любое сообщение в любой ваш бизнес-чат.\n\n"
+            "После этого нажмите кнопку «Проверить снова» 👇"
+        )
+        retry_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Проверить снова", callback_data="desc:open_start")],
+            [InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")],
+        ])
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=not_conn_text,
+                reply_markup=retry_kb,
                 parse_mode="Markdown",
             )
-        except Exception:
-            await msg.reply_text(err_msg, parse_mode="Markdown")
+        else:
+            await msg.reply_text(
+                not_conn_text,
+                reply_markup=retry_kb,
+                parse_mode="Markdown",
+            )
+        return True
+
+    # Проверка подключения и прав (Правило 999)
+    ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
+    if not ok:
+        retry_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Повторить проверку", callback_data="desc:open_start")],
+            [InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")],
+        ])
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=err_msg,
+                reply_markup=retry_kb,
+                parse_mode="Markdown",
+            )
+        else:
+            try:
+                await context.bot.send_message(
+                    chat_id=msg.chat_id,
+                    text=err_msg,
+                    reply_markup=retry_kb,
+                    business_connection_id=getattr(msg, "business_connection_id", None),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                await msg.reply_text(err_msg, reply_markup=retry_kb, parse_mode="Markdown")
         return True
 
     text_content, keyboard = build_description_menu(conn, user_id)
 
     try:
-        await context.bot.send_message(
-            chat_id=msg.chat_id,
-            text=text_content,
-            reply_markup=keyboard,
-            business_connection_id=getattr(msg, "business_connection_id", None),
-            parse_mode="Markdown",
-        )
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=text_content,
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=msg.chat_id,
+                text=text_content,
+                reply_markup=keyboard,
+                business_connection_id=getattr(msg, "business_connection_id", None),
+                parse_mode="Markdown",
+            )
     except Exception as e:
         log.error(f"failed to send description menu: {e}")
 
@@ -272,6 +314,10 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
 
     action = parts[1]
     bc_id = tn_db.get_user_bc_id(conn, target_user_id)
+
+    if action == "open_start":
+        await query.answer()
+        return await description_command(update, context, conn)
 
     # Настройка одиночного авто-описания
     if action == "setup_single":

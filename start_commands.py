@@ -64,7 +64,6 @@ INSTRUCTION_TEXT = (
 
 def get_start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Mini App (Статистика и настройки)", web_app=WebAppInfo(url="https://bot.rad1kal.fun"))],
         [InlineKeyboardButton("🕒 Время в имени", callback_data="time:open_start")],
         [InlineKeyboardButton("📝 Авто-описание", callback_data="desc:open_start")],
         [InlineKeyboardButton("💎 Премиум подписка", callback_data="prem:main")],
@@ -97,13 +96,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not target:
         return
 
-    help_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 Открыть Mini App", web_app=WebAppInfo(url="https://bot.rad1kal.fun"))]
-    ])
-
     await target.reply_text(
         text=HELP_SUMMARY_TEXT,
-        reply_markup=help_kb,
         parse_mode="Markdown",
     )
 

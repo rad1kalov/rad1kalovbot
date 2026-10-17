@@ -74,6 +74,16 @@ def init_admin_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # Отложенные выдачи прав (до первого входа пользователя)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pending_grants (
+            username    TEXT,
+            feature     TEXT,
+            days        INTEGER,
+            PRIMARY KEY (username, feature)
+        )
+    """)
+
     conn.commit()
 
 
@@ -89,6 +99,26 @@ def record_bot_user(conn: sqlite3.Connection, user_id: int, username: Optional[s
             first_name = COALESCE(excluded.first_name, bot_users.first_name)
     """, (user_id, clean_username, first_name, now_iso()))
     conn.commit()
+
+    if clean_username:
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT feature, days FROM pending_grants WHERE LOWER(username) = LOWER(?)",
+                (clean_username,)
+            ).fetchall()
+            for r in rows:
+                feat = r["feature"]
+                d = r["days"]
+                grant_feature(conn, user_id, feat, d)
+                if feat in ("premium", "prem"):
+                    from premium_db import activate_premium
+                    activate_premium(conn, user_id, days=d if d and d > 0 else None, plan="lifetime" if not d else f"{d}d")
+            if rows:
+                conn.execute("DELETE FROM pending_grants WHERE LOWER(username) = LOWER(?)", (clean_username,))
+                conn.commit()
+        except Exception:
+            pass
 
 
 def resolve_user_id(conn: sqlite3.Connection, username_or_id: str) -> Optional[int]:

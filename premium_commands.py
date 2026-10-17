@@ -13,26 +13,23 @@ import tn_db
 
 log = logging.getLogger(__name__)
 
-# Тарифы подписки: (название, звезды XTR, рубли для ЮKassa, дней)
+# Тарифы подписки: (название, звезды XTR, дней)
 TARIFFS = {
     "1m": {
         "title": "1 месяц Premium",
         "stars": 150,
-        "rub": "299 ₽",
         "days": 30,
         "desc": "Премиум-доступ на 30 дней: без водяного знака в био, авто-заморозка стриков и расширенные лимиты.",
     },
     "3m": {
         "title": "3 месяца Premium",
         "stars": 390,
-        "rub": "799 ₽",
         "days": 90,
         "desc": "Премиум-доступ на 90 дней со скидкой 15%: всё включено.",
     },
     "lifetime": {
         "title": "Premium Навсегда",
         "stars": 990,
-        "rub": "1990 ₽",
         "days": None,
         "desc": "Пожизненный доступ к премиум-функциям и обновлениям.",
     },
@@ -48,7 +45,7 @@ def build_premium_main_screen(conn: sqlite3.Connection, user_id: int):
         footer = "🎉 *Все премиум-привилегии включены!* Водяной знак из вашего описания удалён."
     else:
         status_line = "НЕ АКТИВЕН ❌ (Бесплатный тариф)"
-        footer = "Выберите подходящий тариф ниже, чтобы снять ограничения 👇"
+        footer = "Выберите подходящий тариф ниже для оплаты через Telegram Stars 👇"
 
     text = (
         "💎 *Telegram Business Premium*\n\n"
@@ -64,42 +61,16 @@ def build_premium_main_screen(conn: sqlite3.Connection, user_id: int):
 
     keyboard = [
         [
-            InlineKeyboardButton("⭐️ 1 месяц — 150 Stars (299 ₽)", callback_data="prem:tier:1m"),
+            InlineKeyboardButton("⭐️ 1 месяц — 150 Stars", callback_data="prem:pay:stars:1m"),
         ],
         [
-            InlineKeyboardButton("⭐️ 3 месяца — 390 Stars (799 ₽)", callback_data="prem:tier:3m"),
+            InlineKeyboardButton("⭐️ 3 месяца — 390 Stars (-15%)", callback_data="prem:pay:stars:3m"),
         ],
         [
-            InlineKeyboardButton("⭐️ Навсегда — 990 Stars (1990 ₽)", callback_data="prem:tier:lifetime"),
+            InlineKeyboardButton("⭐️ Навсегда — 990 Stars", callback_data="prem:pay:stars:lifetime"),
         ],
         [
             InlineKeyboardButton("⬅️ Назад в главное меню", callback_data="prem:back"),
-        ],
-    ]
-
-    return text, InlineKeyboardMarkup(keyboard)
-
-
-def build_payment_method_screen(tier_key: str):
-    tier = TARIFFS.get(tier_key, TARIFFS["1m"])
-
-    text = (
-        f"💎 *Оплата подписки: {tier['title']}*\n\n"
-        f"_{tier['desc']}_\n\n"
-        "Выберите способ оплаты:\n"
-        f"• **Telegram Stars:** {tier['stars']} ⭐ (моментальная оплата прямо в приложении)\n"
-        f"• **ЮKassa:** {tier['rub']} (Банковские карты, СБП, Mir Pay)"
-    )
-
-    keyboard = [
-        [
-            InlineKeyboardButton(f"⭐ Оплатить Telegram Stars ({tier['stars']} ⭐)", callback_data=f"prem:pay:stars:{tier_key}"),
-        ],
-        [
-            InlineKeyboardButton(f"💳 ЮKassa ({tier['rub']})", callback_data=f"prem:pay:yookassa:{tier_key}"),
-        ],
-        [
-            InlineKeyboardButton("⬅️ Назад к тарифам", callback_data="prem:main"),
         ],
     ]
 
@@ -133,27 +104,12 @@ async def handle_premium_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
         return True
 
-    elif action == "tier":
-        tier_key = parts[2] if len(parts) > 2 else "1m"
-        await query.answer()
-        text, keyboard = build_payment_method_screen(tier_key)
-        await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
-        return True
-
     elif action == "pay":
         method = parts[2] if len(parts) > 2 else "stars"
         tier_key = parts[3] if len(parts) > 3 else "1m"
         tier = TARIFFS.get(tier_key, TARIFFS["1m"])
 
-        if method == "yookassa":
-            # Заглушка по требованию пользователя
-            await query.answer(
-                "⚠️ Платежная система ЮKassa находится в процессе подключения.\nПожалуйста, воспользуйтесь оплатой через Telegram Stars ⭐",
-                show_alert=True,
-            )
-            return True
-
-        elif method == "stars":
+        if method == "stars":
             await query.answer("Создаём счёт на оплату звездами ⭐...")
             chat_id = update.effective_chat.id
             payload = f"prem_stars_{tier_key}_{user_id}_{int(time.time())}"

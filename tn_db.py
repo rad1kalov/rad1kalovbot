@@ -273,6 +273,48 @@ def get_user_bc_id(conn: sqlite3.Connection, user_id: int) -> Optional[str]:
     except Exception:
         pass
 
+    # 4. Если в settings есть подключение (для персонального бота или OWNER_ID)
+    try:
+        row4 = conn.execute(
+            "SELECT business_connection_id FROM settings WHERE business_connection_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
+        if row4 and row4["business_connection_id"]:
+            total_conns = conn.execute(
+                "SELECT COUNT(DISTINCT business_connection_id) FROM settings WHERE business_connection_id IS NOT NULL"
+            ).fetchone()[0]
+            if total_conns <= 1 or user_id == 8470104943:
+                bc = row4["business_connection_id"]
+                conn.execute("""
+                    INSERT INTO settings (user_id, business_connection_id, is_active, updated_at)
+                    VALUES (?, ?, 1, datetime('now'))
+                    ON CONFLICT(user_id) DO UPDATE SET business_connection_id = excluded.business_connection_id, is_active = 1
+                """, (user_id, bc))
+                conn.commit()
+                return bc
+    except Exception:
+        pass
+
+    # 5. Из таблицы series (если стрик уже был создан)
+    try:
+        row5 = conn.execute(
+            "SELECT business_connection_id FROM series WHERE business_connection_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row5 and row5["business_connection_id"]:
+            total_conns = conn.execute(
+                "SELECT COUNT(DISTINCT business_connection_id) FROM series WHERE business_connection_id IS NOT NULL"
+            ).fetchone()[0]
+            if total_conns <= 1 or user_id == 8470104943:
+                bc = row5["business_connection_id"]
+                conn.execute("""
+                    INSERT INTO settings (user_id, business_connection_id, is_active, updated_at)
+                    VALUES (?, ?, 1, datetime('now'))
+                    ON CONFLICT(user_id) DO UPDATE SET business_connection_id = excluded.business_connection_id, is_active = 1
+                """, (user_id, bc))
+                conn.commit()
+                return bc
+    except Exception:
+        pass
+
     return None
 
 
