@@ -59,10 +59,6 @@ async def check_name_and_bio_permissions(
     if can_name is False or can_bio is False:
         return False, RULE_999_NOTICE
 
-    # Дополнительно проверяем базовое право отвечать/управлять
-    if hasattr(bc, "can_reply") and not bc.can_reply:
-        return False, RULE_999_NOTICE
-
     return True, ""
 
 

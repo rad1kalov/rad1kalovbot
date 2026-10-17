@@ -24,7 +24,7 @@ from series import process_message, build_summary
 from series_commands import handle_series_command, handle_series_callback
 from series_worker import series_worker
 
-from tn_commands import handle_time_command, handle_time_callback, handle_weather_command
+from tn_commands import handle_time_command, handle_time_callback, handle_weather_command, send_timezone_menu
 from tn_worker import name_worker
 from tn_db import init_settings_table, get_ephemeral_limit_for_user
 
@@ -295,19 +295,6 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await premium_command(update, context, DB)
                 return
 
-            # Время
-            if await handle_time_command(update, context, DB):
-                return
-
-            # Погода
-            if await handle_weather_command(update, context, DB):
-                return
-
-            # Авто-описание
-            if clean in ("/description", ".description") or clean.startswith(("/description ", ".description ")):
-                await description_command(update, context, DB)
-                return
-
             # Админка
             if clean in ("/admin", ".admin"):
                 await admin_command(update, context, DB)
@@ -576,15 +563,20 @@ def main():
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
 
     # Инструкции и переходы
-    async def _instruction_or_desc(u, c):
+    async def _instruction_or_menu(u, c):
         q = u.callback_query
-        if q and q.data == "desc:open_start":
+        if not q:
+            return
+        if q.data == "desc:open_start":
             await q.answer()
             await description_command(u, c, DB)
+        elif q.data == "time:open_start":
+            await q.answer()
+            await send_timezone_menu(u, c, DB)
         else:
             await instruction_callback(u, c)
 
-    app.add_handler(CallbackQueryHandler(_instruction_or_desc, pattern=r"^(instruction|start_back|desc:open_start)$"))
+    app.add_handler(CallbackQueryHandler(_instruction_or_menu, pattern=r"^(instruction|start_back|desc:open_start|time:open_start)$"))
 
     # Бизнес-сообщения
     app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, on_business_message))

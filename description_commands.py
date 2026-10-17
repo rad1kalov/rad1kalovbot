@@ -10,7 +10,7 @@ import logging
 import sqlite3
 from typing import Optional, List, Tuple
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
 import tn_db
@@ -98,6 +98,9 @@ def build_description_menu(conn: sqlite3.Connection, user_id: int) -> Tuple[str,
         [
             InlineKeyboardButton("👫 Установить парные описания", callback_data=f"desc:setup_pair:{user_id}"),
         ],
+        [
+            InlineKeyboardButton("📱 Открыть в Mini App", web_app=WebAppInfo(url="https://bot.rad1kal.fun")),
+        ],
     ]
 
     if has_active:
@@ -115,17 +118,16 @@ def build_description_menu(conn: sqlite3.Connection, user_id: int) -> Tuple[str,
 # ─────────────────────── Команда /description ───────────────────────
 
 async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection) -> bool:
-    """Обработчик команды /description и .description."""
-    msg = update.business_message or update.message
+    """Обработчик команды /description и .description (ТОЛЬКО в ЛС с ботом)."""
+    msg = update.message or update.effective_message
     if not msg:
         return False
 
-    # Защита: в бизнес-чатах команда разрешена ТОЛЬКО владельцу аккаунта
-    if getattr(msg, "business_connection_id", None):
-        is_own = await is_own_business_message(context.bot, conn, msg)
-        if not is_own:
-            log.info(f"Игнорируем .description от собеседника ({msg.from_user.id if msg.from_user else 0})")
-            return False
+    chat = update.effective_chat
+    # Проверка: автоописание настраивается ТОЛЬКО в личке с ботом
+    if getattr(msg, "business_connection_id", None) or (chat and chat.type != "private"):
+        log.info("Команда .description проигнорирована: вызвана вне личных сообщений с ботом")
+        return False
 
     sender = msg.from_user
     user_id = sender.id if sender else 0
@@ -136,10 +138,9 @@ async def description_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     first_name = sender.first_name if sender else None
     record_bot_user(conn, user_id, username, first_name)
 
-    conn_id = getattr(msg, "business_connection_id", None)
-    bc_id = conn_id or tn_db.get_user_bc_id(conn, user_id)
+    bc_id = tn_db.get_user_bc_id(conn, user_id)
 
-    # Проверка Правила 999
+    # Проверка подключения
     ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
     if not ok:
         try:
@@ -339,11 +340,14 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
             await query.answer("Ошибка: строки не найдены. Попробуйте снова.", show_alert=True)
             return True
 
+        if not bc_id:
+            bc_id = tn_db.get_user_bc_id(conn, target_user_id)
+
         conn.execute("""
             INSERT INTO auto_descriptions (user_id, business_conn_id, lines_json, interval_minutes, current_index, is_active, last_change)
             VALUES (?, ?, ?, ?, 0, 1, ?)
             ON CONFLICT(user_id) DO UPDATE SET
-                business_conn_id = excluded.business_conn_id,
+                business_conn_id = COALESCE(excluded.business_conn_id, auto_descriptions.business_conn_id),
                 lines_json = excluded.lines_json,
                 interval_minutes = excluded.interval_minutes,
                 current_index = 0,
@@ -356,7 +360,17 @@ async def handle_description_callback(update: Update, context: ContextTypes.DEFA
         prem = is_premium(conn, target_user_id)
         target_bio = format_bio_with_watermark(lines[0], prem)
         if bc_id:
-            await set_business_account_bio(context.bot, bc_id, target_bio)
+            ok = await set_business_account_bio(context.bot, bc_id, target_bio)
+            if ok:
+                try:
+                    conn.execute("""
+                        INSERT INTO bio_settings (business_connection_id, user_id, current_bio)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(business_connection_id) DO UPDATE SET current_bio = excluded.current_bio, user_id = excluded.user_id
+                    """, (bc_id, target_user_id, target_bio))
+                    conn.commit()
+                except Exception:
+                    pass
 
         context.user_data.pop("pending_single_lines", None)
         context.user_data.pop("desc_state", None)
@@ -489,17 +503,10 @@ async def handle_description_text_input(update: Update, context: ContextTypes.DE
 
     # 1. Ожидание строк одиночного авто-описания
     if state == "waiting_single_lines":
-        raw_parts = [p.strip() for p in text.split(";") if p.strip()]
+        raw_parts = [p.strip() for p in text.replace("\n", ";").split(";") if p.strip()]
         if not raw_parts:
             await msg.reply_text(
-                "⚠️ Не найдено строк! Разделяйте строки точкой с запятой `;`.\nПопробуйте ещё раз:"
-            )
-            return True
-
-        if len(raw_parts) < 2:
-            await msg.reply_text(
-                "⚠️ Для авто-ротации укажите минимум *2 строки*, разделённые `;`.\nПопробуйте ещё раз:",
-                parse_mode="Markdown",
+                "⚠️ Не найдено строк! Разделяйте строки точкой с запятой `;` или переносом строки.\nПопробуйте ещё раз:"
             )
             return True
 
@@ -522,9 +529,9 @@ async def handle_description_text_input(update: Update, context: ContextTypes.DE
             ]
         ])
 
+        desc_type_note = "Выберите интервал смены описания 👇" if len(raw_parts) > 1 else "Указана 1 строка (будет установлена в профиль). Выберите подтверждение 👇"
         await msg.reply_text(
-            f"✅ *Строки успешно приняты ({len(raw_parts)} шт.):*\n\n{preview}\n\n"
-            "Выберите интервал смены описания 👇",
+            f"✅ *Строки успешно приняты ({len(raw_parts)} шт.):*\n\n{preview}\n\n{desc_type_note}",
             reply_markup=interval_kb,
             parse_mode="Markdown",
         )

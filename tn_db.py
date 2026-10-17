@@ -225,15 +225,146 @@ def get_setting_by_bc_id(conn: sqlite3.Connection, bc_id: str) -> Optional[Dict[
 
 
 def get_user_bc_id(conn: sqlite3.Connection, user_id: int) -> Optional[str]:
-    """Возвращает активный business_connection_id строго для указанного user_id."""
+    """Возвращает активный business_connection_id строго для указанного user_id с авто-поиском."""
+    if not user_id or user_id <= 0:
+        return None
     conn.row_factory = sqlite3.Row
+    # 1. Из таблицы settings
     row = conn.execute(
-        "SELECT business_connection_id FROM settings WHERE user_id = ? AND is_active = 1",
+        "SELECT business_connection_id FROM settings WHERE user_id = ? AND business_connection_id IS NOT NULL",
         (user_id,),
     ).fetchone()
     if row and row["business_connection_id"]:
         return row["business_connection_id"]
+
+    # 2. Из таблицы bio_settings (если была сохранена ранее)
+    try:
+        row2 = conn.execute(
+            "SELECT business_connection_id FROM bio_settings WHERE user_id = ? AND business_connection_id IS NOT NULL",
+            (user_id,),
+        ).fetchone()
+        if row2 and row2["business_connection_id"]:
+            bc = row2["business_connection_id"]
+            conn.execute("""
+                INSERT INTO settings (user_id, business_connection_id, is_active, updated_at)
+                VALUES (?, ?, 1, datetime('now'))
+                ON CONFLICT(user_id) DO UPDATE SET business_connection_id = excluded.business_connection_id, is_active = 1
+            """, (user_id, bc))
+            conn.commit()
+            return bc
+    except Exception:
+        pass
+
+    # 3. Из таблицы сообщений (последнее сообщение от этого пользователя)
+    try:
+        row3 = conn.execute(
+            "SELECT business_connection_id FROM messages WHERE from_user_id = ? AND business_connection_id IS NOT NULL ORDER BY date DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        if row3 and row3["business_connection_id"]:
+            bc = row3["business_connection_id"]
+            conn.execute("""
+                INSERT INTO settings (user_id, business_connection_id, is_active, updated_at)
+                VALUES (?, ?, 1, datetime('now'))
+                ON CONFLICT(user_id) DO UPDATE SET business_connection_id = excluded.business_connection_id, is_active = 1
+            """, (user_id, bc))
+            conn.commit()
+            return bc
+    except Exception:
+        pass
+
     return None
+
+
+def get_webapp_stats(conn: sqlite3.Connection, user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Возвращает полную статистику для Mini App (как глобальную, так и для конкретного пользователя)."""
+    conn.row_factory = sqlite3.Row
+
+    # Глобальные счетчики
+    total_messages = 0
+    total_ephemeral = 0
+    total_users = 0
+    active_streaks = 0
+    active_time_count = 0
+    active_desc_count = 0
+
+    try:
+        r = conn.execute("SELECT COUNT(*), SUM(is_ephemeral) FROM messages").fetchone()
+        if r:
+            total_messages = r[0] or 0
+            total_ephemeral = r[1] or 0
+    except Exception:
+        pass
+
+    try:
+        r = conn.execute("SELECT COUNT(*) FROM bot_users").fetchone()
+        if r:
+            total_users = r[0] or 0
+    except Exception:
+        pass
+
+    try:
+        r = conn.execute("SELECT COUNT(*) FROM series WHERE is_active = 1").fetchone()
+        if r:
+            active_streaks = r[0] or 0
+    except Exception:
+        pass
+
+    try:
+        r = conn.execute("SELECT COUNT(*) FROM settings WHERE is_active = 1 AND (time_enabled = 1 OR night_status_enabled = 1)").fetchone()
+        if r:
+            active_time_count = r[0] or 0
+    except Exception:
+        pass
+
+    try:
+        r = conn.execute("SELECT COUNT(*) FROM auto_descriptions WHERE is_active = 1").fetchone()
+        if r:
+            active_desc_count = r[0] or 0
+    except Exception:
+        pass
+
+    user_stats = {
+        "user_messages": 0,
+        "user_ephemeral": 0,
+        "user_best_streak": 0,
+        "user_active_streaks": 0,
+    }
+
+    if user_id:
+        try:
+            r = conn.execute(
+                "SELECT COUNT(*), SUM(is_ephemeral) FROM messages WHERE from_user_id = ?",
+                (user_id,)
+            ).fetchone()
+            if r:
+                user_stats["user_messages"] = r[0] or 0
+                user_stats["user_ephemeral"] = r[1] or 0
+        except Exception:
+            pass
+
+        try:
+            r = conn.execute(
+                "SELECT COUNT(*), MAX(current_streak) FROM series WHERE user_id = ? AND is_active = 1",
+                (user_id,)
+            ).fetchone()
+            if r:
+                user_stats["user_active_streaks"] = r[0] or 0
+                user_stats["user_best_streak"] = r[1] or 0
+        except Exception:
+            pass
+
+    return {
+        "global": {
+            "total_messages": total_messages,
+            "total_ephemeral": total_ephemeral,
+            "total_users": total_users,
+            "active_streaks": active_streaks,
+            "active_time_users": active_time_count,
+            "active_desc_users": active_desc_count,
+        },
+        "user": user_stats,
+    }
 
 
 def get_active_time_users(conn: sqlite3.Connection) -> List[Dict[str, Any]]:

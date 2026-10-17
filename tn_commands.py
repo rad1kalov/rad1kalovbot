@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import ContextTypes
 
 import tn_db
@@ -88,6 +88,12 @@ def build_timezone_keyboard(conn: sqlite3.Connection, user_id: int) -> InlineKey
     keyboard.append([
         InlineKeyboardButton("🔄 Обновить в профиле сейчас", callback_data=f"tz:refresh:{user_id}")
     ])
+    keyboard.append([
+        InlineKeyboardButton("📱 Открыть в Mini App", web_app=WebAppInfo(url="https://bot.rad1kal.fun"))
+    ])
+    keyboard.append([
+        InlineKeyboardButton("⬅️ В главное меню", callback_data="start_back")
+    ])
 
     return InlineKeyboardMarkup(keyboard)
 
@@ -132,9 +138,15 @@ def get_time_text(conn: sqlite3.Connection, user_id: int) -> str:
 async def handle_time_command(
     update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection
 ) -> bool:
-    """Обрабатывает команду .time."""
-    msg = update.business_message or update.message
+    """Обрабатывает команду .time и /time (ТОЛЬКО в ЛС с ботом)."""
+    msg = update.message or update.effective_message
     if not msg or not msg.text:
+        return False
+
+    chat = update.effective_chat
+    # Проверка: время в нике настраивается ТОЛЬКО в личке с ботом
+    if getattr(msg, "business_connection_id", None) or (chat and chat.type != "private"):
+        log.info("Команда .time проигнорирована: вызвана вне личных сообщений с ботом")
         return False
 
     text = msg.text.strip().lower()
@@ -142,29 +154,30 @@ async def handle_time_command(
     if not parts or parts[0] not in (".time", "/time"):
         return False
 
-    # Защита: в бизнес-чатах команда разрешена ТОЛЬКО владельцу аккаунта
-    if getattr(msg, "business_connection_id", None):
-        is_own = await is_own_business_message(context.bot, conn, msg)
-        if not is_own:
-            log.info(f"Игнорируем .time от собеседника ({msg.from_user.id if msg.from_user else 0})")
-            return False
+    return await send_timezone_menu(update, context, conn)
 
-    user_id = msg.from_user.id if msg.from_user else 0
-    if not user_id:
+
+async def send_timezone_menu(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, conn: sqlite3.Connection
+) -> bool:
+    """Отправляет меню настроек времени и активирует время в имени (ТОЛЬКО в ЛС)."""
+    user = update.effective_user
+    msg = update.effective_message or update.message
+    if not user or not msg:
         return False
 
+    user_id = user.id
+
     # Находим business_connection_id строго для этого пользователя
-    bc_id = getattr(msg, "business_connection_id", None)
+    bc_id = tn_db.get_user_bc_id(conn, user_id)
     if not bc_id:
-        bc_id = tn_db.get_user_bc_id(conn, user_id)
-        if not bc_id:
-            await msg.reply_text(
-                "⚠️ *У вас не подключен Telegram Business!*\n\n"
-                "Для настройки времени подключите бота:\n"
-                "*Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
-                parse_mode="Markdown",
-            )
-            return True
+        await msg.reply_text(
+            "⚠️ *У вас не подключен Telegram Business!*\n\n"
+            "Для настройки времени подключите бота:\n"
+            "*Настройки* ➔ *Telegram для бизнеса* ➔ *Чат-боты*.",
+            parse_mode="Markdown",
+        )
+        return True
 
     # Проверка прав доступа в Telegram Business (Правило 999)
     ok, err_msg = await check_name_and_bio_permissions(context.bot, conn, bc_id)
@@ -183,7 +196,7 @@ async def handle_time_command(
     # Сохраняем имя владельца, если его ещё нет
     user_setting = tn_db.get_user_setting(conn, user_id)
     first_name = (user_setting.get("first_name") if user_setting else "") or (
-        msg.from_user.first_name if (msg.from_user and msg.from_user.id == user_id) else ""
+        user.first_name if user else ""
     )
     tn_db.upsert_user_connection(conn, user_id, bc_id, first_name=first_name, is_active=True)
 
@@ -216,15 +229,22 @@ async def handle_time_command(
     text_content = get_time_text(conn, user_id)
 
     try:
-        await context.bot.send_message(
-            chat_id=msg.chat_id,
-            text=text_content,
-            reply_markup=keyboard,
-            business_connection_id=getattr(msg, "business_connection_id", None),
-            parse_mode="Markdown",
-        )
+        if update.callback_query:
+            await update.callback_query.edit_message_text(
+                text=text_content,
+                reply_markup=keyboard,
+                parse_mode="Markdown",
+            )
+        else:
+            await context.bot.send_message(
+                chat_id=msg.chat_id,
+                text=text_content,
+                reply_markup=keyboard,
+                business_connection_id=getattr(msg, "business_connection_id", None),
+                parse_mode="Markdown",
+            )
     except Exception as e:
-        log.error(f"send_message failed in .time: {e}")
+        log.error(f"send_message failed in send_timezone_menu: {e}")
 
     return True
 
@@ -243,12 +263,11 @@ async def handle_weather_command(
     if cmd not in (".weather", "/weather", ".погода", "/погода"):
         return False
 
-    # Защита: в бизнес-чатах команда разрешена ТОЛЬКО владельцу аккаунта
-    if getattr(msg, "business_connection_id", None):
-        is_own = await is_own_business_message(context.bot, conn, msg)
-        if not is_own:
-            log.info(f"Игнорируем .weather от собеседника ({msg.from_user.id if msg.from_user else 0})")
-            return False
+    chat = update.effective_chat
+    # Погода в профиле настраивается ТОЛЬКО в личке с ботом
+    if getattr(msg, "business_connection_id", None) or (chat and chat.type != "private"):
+        log.info("Команда .weather проигнорирована: вызвана вне личных сообщений с ботом")
+        return False
 
     user_id = msg.from_user.id if msg.from_user else 0
     if not user_id:

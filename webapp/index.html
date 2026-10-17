@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Telegram Business Assistant | Mini App</title>
+  <!-- Telegram WebApp JS SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg-color: var(--tg-theme-bg-color, #0f172a);
+      --secondary-bg-color: var(--tg-theme-secondary-bg-color, #1e293b);
+      --text-color: var(--tg-theme-text-color, #f8fafc);
+      --hint-color: var(--tg-theme-hint-color, #94a3b8);
+      --link-color: var(--tg-theme-link-color, #38bdf8);
+      --button-color: var(--tg-theme-button-color, #3b82f6);
+      --button-text-color: var(--tg-theme-button-text-color, #ffffff);
+      --accent: #6366f1;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      min-height: 100vh;
+      padding-bottom: 80px;
+      overflow-x: hidden;
+    }
+
+    /* Header */
+    .header {
+      padding: 18px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(15, 23, 42, 0.85);
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .user-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--button-color), var(--accent));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 17px;
+      color: #fff;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .user-info h2 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .user-info p {
+      font-size: 12px;
+      color: var(--hint-color);
+    }
+
+    .status-pill {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-pill.offline {
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--danger);
+    }
+
+    /* Container & Tabs */
+    .container {
+      padding: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.25s ease-out;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      backdrop-filter: blur(8px);
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Stats Grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-box {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-box .stat-icon {
+      font-size: 20px;
+      margin-bottom: 6px;
+    }
+
+    .stat-box .stat-value {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-color);
+    }
+
+    .stat-box .stat-label {
+      font-size: 11px;
+      color: var(--hint-color);
+      margin-top: 2px;
+    }
+
+    /* Form controls */
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-color);
+    }
+
+    .form-hint {
+      font-size: 11px;
+      color: var(--hint-color);
+      margin-top: 4px;
+    }
+
+    .input-text, select {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--card-border);
+      color: var(--text-color);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .input-text:focus, select:focus {
+      border-color: var(--button-color);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    }
+
+    /* Toggle Switch */
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .switch-row:last-child {
+      border-bottom: none;
+    }
+
+    .switch-info {
+      flex: 1;
+      padding-right: 14px;
+    }
+
+    .switch-title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .switch-desc {
+      font-size: 12px;
+      color: var(--hint-color);
+      margin-top: 2px;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 28px;
+      flex-shrink: 0;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255, 255, 255, 0.15);
+      transition: .3s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .3s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--button-color);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(20px);
+    }
+
+    /* Buttons */
+    .btn {
+      width: 100%;
+      background: var(--button-color);
+      color: var(--button-text-color);
+      border: none;
+      border-radius: 14px;
+      padding: 14px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+      opacity: 0.9;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-color);
+      box-shadow: none;
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+      box-shadow: none;
+    }
+
+    /* Lines List for Bio */
+    .line-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .line-item input {
+      flex: 1;
+    }
+
+    .line-del-btn {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--danger);
+      border-radius: 10px;
+      width: 38px;
+      height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    /* Bottom Navigation Bar */
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 64px;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(16px);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-around;
+      z-index: 100;
+      padding: 0 8px;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--hint-color);
+      font-size: 11px;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      width: 25%;
+      height: 100%;
+      transition: color 0.2s;
+    }
+
+    .nav-item.active {
+      color: var(--button-color);
+    }
+
+    .nav-item .nav-icon {
+      font-size: 20px;
+      margin-bottom: 3px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-100px);
+      background: rgba(15, 23, 42, 0.95);
+      color: #fff;
+      padding: 12px 20px;
+      border-radius: 30px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      z-index: 2000;
+      transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast">
+    <span id="toast-icon">✅</span>
+    <span id="toast-text">Сохранено</span>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="user-badge">
+      <div id="user-avatar" class="avatar">U</div>
+      <div class="user-info">
+        <h2 id="user-name">Пользователь</h2>
+        <p id="user-username">@username</p>
+      </div>
+    </div>
+    <div id="business-status" class="status-pill">
+      <span>●</span> Бизнес подключен
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- TAB 1: СТАТИСТИКА -->
+    <div id="tab-stats" class="tab-content active">
+      <div class="card">
+        <div class="card-title">
+          <span>📊 Ваша статистика сообщений</span>
+          <span style="font-size: 12px; color: var(--hint-color);" id="current-date"></span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-icon">💬</div>
+            <div class="stat-value" id="stat-user-messages">0</div>
+            <div class="stat-label">Сообщений в чатах</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-value" id="stat-user-ephemeral">0</div>
+            <div class="stat-label">Одноразовых медиа</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">⚡️</div>
+            <div class="stat-value" id="stat-active-streaks">0</div>
+            <div class="stat-label">Активных стриков</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">🏆</div>
+            <div class="stat-value" id="stat-best-streak">0 дн.</div>
+            <div class="stat-label">Рекорд серии</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">
+          <span>🌐 Глобальная статистика бота</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-icon">👥</div>
+            <div class="stat-value" id="stat-total-users">0</div>
+            <div class="stat-label">Пользователей</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">🕒</div>
+            <div class="stat-value" id="stat-active-time">0</div>
+            <div class="stat-label">Время в нике</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">📝</div>
+            <div class="stat-value" id="stat-active-desc">0</div>
+            <div class="stat-label">Автоописаний</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-icon">📦</div>
+            <div class="stat-value" id="stat-total-messages">0</div>
+            <div class="stat-label">Всего сообщений</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: ВРЕМЯ В НИКЕ -->
+    <div id="tab-time" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>🕒 Время в профиле</span>
+          <span id="preview-time" style="color: var(--button-color); font-weight: 700;">[12:00]</span>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Время в фамилии</div>
+            <div class="switch-desc">Автоматическое обновление фамилии каждую минуту: <code>[ЧЧ:ММ]</code></div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="time-enabled">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Ночной статус</div>
+            <div class="switch-desc">С 23:00 до 08:00 фамилия меняется на <code>[🌙 Сплю]</code></div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="night-status-enabled">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Погода в имени</div>
+            <div class="switch-desc">Добавляет актуальную температуру: <code>[12:00 +18° ⛅️]</code></div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="weather-enabled">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-top: 14px;">
+          <label class="form-label">Город для погоды</label>
+          <input type="text" id="weather-city" class="input-text" placeholder="Например: Москва">
+          <div class="form-hint">Используется, если включена погода в имени</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Часовой пояс</label>
+          <select id="tz-offset">
+            <option value="2">Калининград (UTC+2)</option>
+            <option value="3" selected>Москва, Санкт-Петербург (UTC+3)</option>
+            <option value="4">Самара, Саратов (UTC+4)</option>
+            <option value="5">Екатеринбург, Уфа (UTC+5)</option>
+            <option value="6">Омск (UTC+6)</option>
+            <option value="7">Красноярск, Новосибирск (UTC+7)</option>
+            <option value="8">Иркутск (UTC+8)</option>
+            <option value="9">Якутск (UTC+9)</option>
+            <option value="10">Владивосток (UTC+10)</option>
+            <option value="11">Магадан (UTC+11)</option>
+            <option value="12">Камчатка (UTC+12)</option>
+            <option value="0">Лондон (UTC+0)</option>
+            <option value="1">Берлин, Рим, Париж (UTC+1)</option>
+            <option value="-5">Нью-Йорк (UTC-5)</option>
+          </select>
+        </div>
+
+        <button id="save-time-btn" class="btn" style="margin-top: 10px;">
+          💾 Сохранить настройки времени
+        </button>
+
+        <button id="refresh-time-now-btn" class="btn btn-secondary" style="margin-top: 8px;">
+          🔄 Обновить в профиле сейчас
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 3: АВТООПИСАНИЕ -->
+    <div id="tab-bio" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>📝 Авто-описание профиля</span>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Активность автоописания</div>
+            <div class="switch-desc">Циклическая смена строк описания по таймеру</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="desc-enabled">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-top: 14px;">
+          <label class="form-label">Интервал смены строк</label>
+          <select id="desc-interval">
+            <option value="1">Каждые 1 минуту</option>
+            <option value="5" selected>Каждые 5 минут</option>
+            <option value="15">Каждые 15 минут</option>
+            <option value="30">Каждые 30 минут</option>
+            <option value="60">Раз в 1 час</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Строки описания для ротации</label>
+          <div id="bio-lines-container">
+            <!-- Динамические строки -->
+          </div>
+          <button id="add-bio-line-btn" class="btn btn-secondary" style="margin-top: 6px; padding: 10px;">
+            ➕ Добавить строку
+          </button>
+          <div class="form-hint">До 140 символов на строку. Для бесплатных пользователей добавляется метка бота.</div>
+        </div>
+
+        <button id="save-bio-btn" class="btn" style="margin-top: 10px;">
+          💾 Сохранить и применить био
+        </button>
+
+        <button id="reset-bio-btn" class="btn btn-danger" style="margin-top: 8px;">
+          🗑 Отключить и сбросить био
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB 4: НАСТРОЙКИ И АККАУНТ -->
+    <div id="tab-settings" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>⚙️ Статус аккаунта</span>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Премиум статус</div>
+            <div class="switch-desc" id="premium-status-desc">Без рекламы и водяных знаков в био</div>
+          </div>
+          <span id="premium-badge" class="status-pill offline">Free</span>
+        </div>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Telegram Business</div>
+            <div class="switch-desc" id="bc-status-desc">Подключение к бизнес-аккаунту</div>
+          </div>
+          <span id="bc-badge" class="status-pill offline">Не подключен</span>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <a href="https://t.me/rad1kal_bot" class="btn btn-secondary" style="text-decoration: none;">
+            🤖 Открыть бота в Telegram
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Navigation -->
+  <div class="bottom-nav">
+    <div class="nav-item active" data-tab="tab-stats">
+      <div class="nav-icon">📊</div>
+      <span>Статистика</span>
+    </div>
+    <div class="nav-item" data-tab="tab-time">
+      <div class="nav-icon">🕒</div>
+      <span>Время</span>
+    </div>
+    <div class="nav-item" data-tab="tab-bio">
+      <div class="nav-icon">📝</div>
+      <span>Био</span>
+    </div>
+    <div class="nav-item" data-tab="tab-settings">
+      <div class="nav-icon">⚙️</div>
+      <span>Аккаунт</span>
+    </div>
+  </div>
+
+  <script>
+    // Инициализация Telegram WebApp
+    const tg = window.Telegram?.WebApp;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      if (tg.enableClosingConfirmation) tg.enableClosingConfirmation();
+    }
+
+    // Хранилище состояния
+    let appState = {
+      user: null,
+      stats: null,
+      time: {},
+      bio: {}
+    };
+
+    function showToast(text, icon = "✅") {
+      const toast = document.getElementById("toast");
+      document.getElementById("toast-icon").textContent = icon;
+      document.getElementById("toast-text").textContent = text;
+      toast.classList.add("show");
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+      setTimeout(() => {
+        toast.classList.remove("show");
+      }, 2500);
+    }
+
+    // Навигация по вкладкам
+    document.querySelectorAll(".nav-item").forEach(item => {
+      item.addEventListener("click", () => {
+        document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+
+        item.classList.add("active");
+        const tabId = item.getAttribute("data-tab");
+        document.getElementById(tabId).classList.add("active");
+
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+      });
+    });
+
+    // Динамические строки био
+    function renderBioLines(lines) {
+      const container = document.getElementById("bio-lines-container");
+      container.innerHTML = "";
+      if (!lines || lines.length === 0) {
+        lines = ["Мой бизнес профиль", "Пишите в ЛС"];
+      }
+
+      lines.forEach((line, idx) => {
+        const row = document.createElement("div");
+        row.className = "line-item";
+        row.innerHTML = `
+          <input type="text" class="input-text bio-line-input" value="${line.replace(/"/g, '&quot;')}" placeholder="Строка ${idx + 1}">
+          <button type="button" class="line-del-btn" onclick="removeBioLine(${idx})">✕</button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function removeBioLine(index) {
+      const inputs = document.querySelectorAll(".bio-line-input");
+      const lines = [];
+      inputs.forEach((inp, idx) => {
+        if (idx !== index) lines.push(inp.value);
+      });
+      renderBioLines(lines);
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    }
+
+    document.getElementById("add-bio-line-btn").addEventListener("click", () => {
+      const inputs = document.querySelectorAll(".bio-line-input");
+      const lines = Array.from(inputs).map(i => i.value);
+      lines.push("Новая строка " + (lines.length + 1));
+      renderBioLines(lines);
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    });
+
+    // Загрузка данных с сервера
+    async function loadData() {
+      try {
+        const initData = tg?.initData || "";
+        const res = await fetch("/api/me", {
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          }
+        });
+        if (!res.ok) throw new Error("Failed to fetch data");
+        const data = await res.json();
+        appState = data;
+
+        // Рендер пользователя
+        const u = data.user || {};
+        document.getElementById("user-name").textContent = u.first_name || "Пользователь";
+        document.getElementById("user-username").textContent = u.username ? `@${u.username}` : `ID: ${u.id || 0}`;
+        document.getElementById("user-avatar").textContent = (u.first_name || "U")[0].toUpperCase();
+
+        const bcStatus = document.getElementById("business-status");
+        const bcBadge = document.getElementById("bc-badge");
+        if (data.business?.is_connected) {
+          bcStatus.className = "status-pill";
+          bcStatus.innerHTML = "<span>●</span> Бизнес активен";
+          bcBadge.className = "status-pill";
+          bcBadge.textContent = "Подключен ✅";
+        } else {
+          bcStatus.className = "status-pill offline";
+          bcStatus.innerHTML = "<span>●</span> Бизнес не подключен";
+          bcBadge.className = "status-pill offline";
+          bcBadge.textContent = "Не активен ❌";
+        }
+
+        const premBadge = document.getElementById("premium-badge");
+        if (u.is_premium) {
+          premBadge.className = "status-pill";
+          premBadge.textContent = "Premium 💎";
+          document.getElementById("premium-status-desc").textContent = "Премиум активен: без водяных знаков";
+        } else {
+          premBadge.className = "status-pill offline";
+          premBadge.textContent = "Free ⚪️";
+        }
+
+        // Рендер статистики
+        const st = data.stats || {};
+        document.getElementById("stat-user-messages").textContent = st.user?.user_messages || 0;
+        document.getElementById("stat-user-ephemeral").textContent = st.user?.user_ephemeral || 0;
+        document.getElementById("stat-active-streaks").textContent = st.user?.user_active_streaks || 0;
+        document.getElementById("stat-best-streak").textContent = (st.user?.user_best_streak || 0) + " дн.";
+
+        document.getElementById("stat-total-users").textContent = st.global?.total_users || 0;
+        document.getElementById("stat-active-time").textContent = st.global?.active_time_users || 0;
+        document.getElementById("stat-active-desc").textContent = st.global?.active_desc_users || 0;
+        document.getElementById("stat-total-messages").textContent = st.global?.total_messages || 0;
+
+        // Рендер настроек времени
+        const tm = data.time || {};
+        document.getElementById("time-enabled").checked = Boolean(tm.time_enabled);
+        document.getElementById("night-status-enabled").checked = Boolean(tm.night_status_enabled);
+        document.getElementById("weather-enabled").checked = Boolean(tm.weather_enabled);
+        document.getElementById("weather-city").value = tm.weather_city || "";
+        if (tm.tz_offset !== undefined && tm.tz_offset !== null) {
+          document.getElementById("tz-offset").value = String(tm.tz_offset);
+        }
+        if (tm.current_time) {
+          document.getElementById("preview-time").textContent = `[${tm.current_time}]`;
+        }
+
+        // Рендер автоописания
+        const bio = data.bio || {};
+        document.getElementById("desc-enabled").checked = Boolean(bio.is_active);
+        if (bio.interval_minutes) {
+          document.getElementById("desc-interval").value = String(bio.interval_minutes);
+        }
+        renderBioLines(bio.lines || []);
+
+      } catch (err) {
+        console.error("Ошибка загрузки данных:", err);
+      }
+    }
+
+    // Сохранение времени
+    document.getElementById("save-time-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const body = {
+        time_enabled: document.getElementById("time-enabled").checked,
+        night_status_enabled: document.getElementById("night-status-enabled").checked,
+        weather_enabled: document.getElementById("weather-enabled").checked,
+        weather_city: document.getElementById("weather-city").value.trim(),
+        tz_offset: parseInt(document.getElementById("tz-offset").value, 10)
+      };
+
+      try {
+        const res = await fetch("/api/settings/time", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body)
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Настройки времени сохранены!");
+          loadData();
+        } else {
+          showToast(d.error || "Ошибка сохранения", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // Обновление профиля сейчас
+    document.getElementById("refresh-time-now-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/action/refresh_name", {
+          method: "POST",
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Профиль Telegram обновлен!");
+          loadData();
+        } else {
+          showToast(d.error || "Ошибка", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // Сохранение автоописания
+    document.getElementById("save-bio-btn").addEventListener("click", async () => {
+      const initData = tg?.initData || "";
+      const inputs = document.querySelectorAll(".bio-line-input");
+      const lines = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+
+      if (lines.length === 0) {
+        showToast("Добавьте хотя бы одну строку!", "⚠️");
+        return;
+      }
+
+      const body = {
+        is_active: document.getElementById("desc-enabled").checked,
+        interval_minutes: parseInt(document.getElementById("desc-interval").value, 10),
+        lines: lines
+      };
+
+      try {
+        const res = await fetch("/api/settings/bio", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body)
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Автоописание обновлено!");
+          loadData();
+        } else {
+          showToast(d.error || "Ошибка сохранения", "⚠️");
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // Сброс автоописания
+    document.getElementById("reset-bio-btn").addEventListener("click", async () => {
+      if (!confirm("Отключить и сбросить автоописание профиля?")) return;
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/action/reset_bio", {
+          method: "POST",
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Автоописание отключено");
+          loadData();
+        }
+      } catch (e) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // Дата сегодня
+    const d = new Date();
+    document.getElementById("current-date").textContent = d.toLocaleDateString("ru-RU", { day: 'numeric', month: 'short' });
+
+    // Старт
+    loadData();
+  </script>
+</body>
+</html>
