@@ -918,7 +918,7 @@ async def on_private_text_message(update: Update, context: ContextTypes.DEFAULT_
         return
 
     # 3. Запрос к нейросети (.ai / .аи / /ai) в ЛС
-    if msg.text and msg.text.strip().lower().startswith((".ai", "/ai", ".аи", "/аи")):
+    if msg.text and msg.text.strip().lower().startswith((".ai", "/ai")):
         if await handle_ai_command(update, context, DB):
             return
 
@@ -962,7 +962,7 @@ def main():
     app.add_handler(CommandHandler("del_admin", lambda u, c: del_admin_command(u, c, DB)))
     app.add_handler(CommandHandler("give_feature", lambda u, c: give_feature_command(u, c, DB)))
     app.add_handler(CommandHandler("broadcast", lambda u, c: broadcast_command(u, c, DB)))
-    app.add_handler(CommandHandler(["ai", "аи"], lambda u, c: handle_ai_command(u, c, DB)))
+    app.add_handler(CommandHandler("ai", lambda u, c: handle_ai_command(u, c, DB)))
 
     # Команды через точку в личных сообщениях с ботом (исключая бизнес-сообщения)
     dm_filter = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
