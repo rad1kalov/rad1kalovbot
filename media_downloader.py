@@ -21,12 +21,13 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 from datetime import datetime
 from typing import Dict, Optional, Tuple, Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
 from premium_db import is_premium
@@ -209,8 +210,53 @@ def _make_session_id(user_id: int, url: str) -> str:
     return h
 
 
+def _fetch_yandex_music_info_sync(url: str) -> Optional[Dict[str, Any]]:
+    """Извлекает название и исполнителя трека Яндекс Музыки через мобильный API без авторизации."""
+    m = re.search(r"/track/(\d+)", url)
+    if not m:
+        return None
+    track_id = m.group(1)
+    try:
+        import urllib.request
+        import json
+        api_url = f"https://api.music.yandex.net/tracks/{track_id}"
+        req = urllib.request.Request(
+            api_url,
+            headers={"User-Agent": "YandexMusic/2024.04 (Android 14; Pixel 8)"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            items = data.get("result", [])
+            if not items:
+                return None
+            res = items[0]
+            title = res.get("title") or "Трек"
+            artists = ", ".join([a.get("name") for a in res.get("artists", []) if a.get("name")])
+            full_title = f"{artists} - {title}" if artists else title
+            duration_ms = res.get("durationMs", 0)
+            dur_str = ""
+            if duration_ms:
+                secs_total = duration_ms // 1000
+                dur_str = f"{secs_total // 60}:{secs_total % 60:02d}"
+            return {
+                "title": full_title[:80],
+                "duration": dur_str,
+                "uploader": artists,
+                "url": url,
+            }
+    except Exception as e:
+        log.debug("Yandex Music API extract failed: %s", e)
+        return None
+
+
 def fetch_media_info_sync(url: str) -> Dict[str, Any]:
     """Извлекает информацию о медиа через yt-dlp без скачивания."""
+    # Для Яндекс Музыки используем прямой API
+    if "music.yandex." in url:
+        ym = _fetch_yandex_music_info_sync(url)
+        if ym:
+            return ym
+
     import yt_dlp
 
     ydl_opts = {
@@ -222,23 +268,27 @@ def fetch_media_info_sync(url: str) -> Dict[str, Any]:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
-            if not info:
-                return {}
-            # Если это плейлист/альбом, берём первое видео
-            if "entries" in info and info["entries"]:
-                info = info["entries"][0]
+            if not info or not isinstance(info, dict):
+                return {"title": "Медиафайл", "duration": "", "uploader": "", "url": url}
 
-            duration = info.get("duration")
+            # Если это плейлист/альбом, берём первое видео
+            if "entries" in info:
+                entries = info.get("entries")
+                if entries and isinstance(entries, list) and entries[0]:
+                    info = entries[0]
+
+            duration = info.get("duration") if isinstance(info, dict) else None
             dur_str = ""
             if duration:
                 mins = int(duration // 60)
                 secs = int(duration % 60)
                 dur_str = f"{mins}:{secs:02d}"
 
+            raw_title = info.get("title") if isinstance(info, dict) else None
             return {
-                "title": (info.get("title") or "Медиафайл").strip()[:80],
+                "title": (raw_title or "Медиафайл").strip()[:80],
                 "duration": dur_str,
-                "uploader": info.get("uploader") or info.get("channel") or "",
+                "uploader": (info.get("uploader") or info.get("channel") or "") if isinstance(info, dict) else "",
                 "url": url,
             }
         except Exception as e:
@@ -359,18 +409,32 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
         "2160p": 2160,
     }
     max_h = height_map.get(quality, 1080)
+    has_ffmpeg = bool(shutil.which("ffmpeg"))
+
+    custom_title = None
+    target_url = url
+
+    # Специальная обработка Яндекс Музыки (прямой поиск аудиопотока по названию)
+    if "music.yandex." in url:
+        ym = _fetch_yandex_music_info_sync(url)
+        if ym and ym.get("title"):
+            custom_title = ym["title"]
+            target_url = f"ytsearch1:{ym['title']} audio"
 
     if is_audio:
+        postprocessors = []
+        if has_ffmpeg:
+            postprocessors.append({
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            })
         ydl_opts = {
             "outtmpl": out_tmpl,
             "format": "bestaudio/best",
             "quiet": True,
             "no_warnings": True,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
+            "postprocessors": postprocessors,
         }
     else:
         # Умный выбор формата: скачивание наилучшего в рамках max_h
@@ -390,14 +454,16 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if not info:
-                return None, "Не удалось извлечь информацию о видео", None
+            info = ydl.extract_info(target_url, download=True)
+            if not info or not isinstance(info, dict):
+                return None, "Не удалось извлечь информацию о медиафайле", None
 
-            if "entries" in info and info["entries"]:
-                info = info["entries"][0]
+            if "entries" in info:
+                entries = info.get("entries")
+                if entries and isinstance(entries, list) and entries[0]:
+                    info = entries[0]
 
-            title = info.get("title") or "Медиафайл"
+            title = custom_title or (info.get("title") if isinstance(info, dict) else None) or "Медиафайл"
 
             # Находим скачанный файл в папке
             files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if os.path.isfile(os.path.join(temp_dir, f))]
@@ -410,7 +476,14 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
             return target_file, title, file_size
     except Exception as e:
         log.error("yt-dlp download failed: %s", e)
-        return None, str(e), None
+        err_msg = str(e)
+        if "NoneType" in err_msg:
+            err_msg = "Сервис заблокировал прямой доступ к медиафайлу (требуется авторизация или VPN)."
+        elif "ffprobe and ffmpeg not found" in err_msg:
+            err_msg = "Для конвертации аудио требуется ffmpeg."
+        elif "404" in err_msg or "Not Found" in err_msg:
+            err_msg = "Медиафайл не найден на сервере сервиса."
+        return None, err_msg, None
 
 
 # ─────────────────────── ОБРАБОТЧИК ИНЛАЙН-КНОПОК ───────────────────────
@@ -536,9 +609,11 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
+                base_ext = os.path.splitext(file_path)[1] or ".mp3"
+                clean_filename = f"{title[:40]}{base_ext}"
                 await context.bot.send_audio(
                     chat_id=query.message.chat_id,
-                    audio=f,
+                    audio=InputFile(f, filename=clean_filename),
                     title=title,
                     caption=f"{icon} *{title}*\n🎵 Аудио | Скачано через @rad1kal_bot",
                     parse_mode="Markdown",
@@ -603,9 +678,11 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
         try:
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
+                base_ext = os.path.splitext(file_path)[1] or ".mp4"
+                clean_filename = f"{title[:40]}{base_ext}"
                 await context.bot.send_video(
                     chat_id=query.message.chat_id,
-                    video=f,
+                    video=InputFile(f, filename=clean_filename),
                     caption=f"{icon} *{title}*\nКачество: {quality} | @rad1kal_bot",
                     parse_mode="Markdown",
                     supports_streaming=True,
