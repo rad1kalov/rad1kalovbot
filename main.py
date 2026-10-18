@@ -65,6 +65,13 @@ from description_worker import description_worker
 from permissions_check import is_own_business_message, get_connection_owner_id
 from media_downloader import init_media_db, handle_media_callback, handle_detected_media_url
 from ai_service import init_ai_db, handle_ai_command
+from emoji_status_db import init_emoji_status_db
+from emoji_status_commands import (
+    emoji_status_command,
+    handle_emoji_status_callback,
+    handle_emoji_status_text_input,
+)
+from emoji_status_worker import emoji_status_worker
 
 load_dotenv()
 
@@ -156,6 +163,7 @@ init_premium_db(DB)
 init_admin_db(DB)
 init_media_db(DB)
 init_ai_db(DB)
+init_emoji_status_db(DB)
 
 # Множество (chat_id, message_id) уже пересланных владельцу одноразовых медиа,
 # чтобы не дублировать отправку при повторных ответах в чате.
@@ -914,7 +922,11 @@ async def on_private_text_message(update: Update, context: ContextTypes.DEFAULT_
     if await handle_description_text_input(update, context, DB):
         return
 
-    # 2. Проверяем ввод текста для рассылки админки
+    # 2. Проверяем привязку Premium-эмодзи к слоту расписания
+    if await handle_emoji_status_text_input(update, context, DB):
+        return
+
+    # 3. Проверяем ввод текста для рассылки админки
     if await handle_admin_text_input(update, context, DB):
         return
 
@@ -956,6 +968,7 @@ def main():
     app.add_handler(CommandHandler("premium", lambda u, c: premium_command(u, c, DB)))
     app.add_handler(CommandHandler("give_premium", lambda u, c: give_premium_admin_command(u, c, DB)))
     app.add_handler(CommandHandler("description", lambda u, c: description_command(u, c, DB)))
+    app.add_handler(CommandHandler(["emoji_status", "status"], lambda u, c: emoji_status_command(u, c, DB)))
     app.add_handler(CommandHandler("time", lambda u, c: handle_time_command(u, c, DB)))
     app.add_handler(CommandHandler("weather", lambda u, c: handle_weather_command(u, c, DB)))
     app.add_handler(CommandHandler("admin", lambda u, c: admin_command(u, c, DB)))
@@ -973,6 +986,7 @@ def main():
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.time\b"), lambda u, c: handle_time_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.weather\b"), lambda u, c: handle_weather_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.description\b"), lambda u, c: description_command(u, c, DB)))
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(emoji_status|status)\b"), lambda u, c: emoji_status_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.avtostop\b"), avtostop_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.premium\b"), lambda u, c: premium_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.admin\b"), lambda u, c: admin_command(u, c, DB)))
@@ -996,16 +1010,20 @@ def main():
         elif q.data == "time:open_start":
             await q.answer()
             await send_timezone_menu(u, c, DB)
+        elif q.data == "emj:open_start":
+            await q.answer()
+            await emoji_status_command(u, c, DB)
         else:
             await instruction_callback(u, c)
 
-    app.add_handler(CallbackQueryHandler(_instruction_or_menu, pattern=r"^(instruction|start_back|desc:open_start|time:open_start)$"))
+    app.add_handler(CallbackQueryHandler(_instruction_or_menu, pattern=r"^(instruction|start_back|desc:open_start|time:open_start|emj:open_start)$"))
 
     # Инлайн-кнопки по разделам
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_series_callback(u, c, DB), pattern=r"^strk:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_time_callback(u, c, DB), pattern=r"^tz:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_premium_callback(u, c, DB), pattern=r"^prem:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_description_callback(u, c, DB), pattern=r"^(desc:|pbio:)"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_emoji_status_callback(u, c, DB), pattern=r"^emj:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_media_callback(u, c, DB), pattern=r"^mdl:"))
 
@@ -1033,6 +1051,7 @@ def main():
         name_task = asyncio.create_task(name_worker(app, DB, interval_seconds=60))
         bio_task = asyncio.create_task(bio_worker(app, DB, interval_seconds=300))
         desc_task = asyncio.create_task(description_worker(app, DB, interval_seconds=60))
+        emoji_task = asyncio.create_task(emoji_status_worker(app, DB, interval_seconds=30))
         webapp_task = asyncio.create_task(
             start_webapp_server(app, DB, BOT_TOKEN, OWNER_ID, host=WEBAPP_HOST, port=WEBAPP_PORT)
         )
@@ -1056,8 +1075,9 @@ def main():
         name_task.cancel()
         bio_task.cancel()
         desc_task.cancel()
+        emoji_task.cancel()
         webapp_task.cancel()
-        for t in (worker_task, name_task, bio_task, desc_task, webapp_task):
+        for t in (worker_task, name_task, bio_task, desc_task, emoji_task, webapp_task):
             try:
                 await t
             except asyncio.CancelledError:

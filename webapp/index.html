@@ -418,6 +418,169 @@
     .toast.show {
       transform: translateX(-50%) translateY(0);
     }
+
+    /* ─── 24h Timeline & Drag & Drop Styles ─── */
+    .timeline-wrapper {
+      margin: 16px 0;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px 12px;
+    }
+
+    .timeline-axis {
+      position: relative;
+      height: 18px;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--hint-color);
+      user-select: none;
+    }
+
+    .timeline-track {
+      position: relative;
+      height: 52px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      overflow: hidden;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .timeline-now-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #ef4444;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .timeline-now-line::after {
+      content: 'сейчас';
+      position: absolute;
+      top: 2px;
+      left: 4px;
+      font-size: 9px;
+      color: #ef4444;
+      font-weight: 700;
+    }
+
+    .slot-block {
+      position: absolute;
+      top: 4px;
+      bottom: 4px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.8), rgba(59, 130, 246, 0.8));
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 6px;
+      font-size: 11px;
+      font-weight: 600;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      user-select: none;
+      touch-action: none;
+      cursor: grab;
+      transition: box-shadow 0.2s;
+    }
+
+    .slot-block.active-drag {
+      cursor: grabbing;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.6);
+      z-index: 20;
+    }
+
+    .slot-block.conflict {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.85), rgba(245, 158, 11, 0.85)) !important;
+      border-color: #ef4444;
+    }
+
+    .slot-handle {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 10px;
+      cursor: ew-resize;
+      background: rgba(255, 255, 255, 0.25);
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+
+    .slot-handle:hover, .slot-handle:active {
+      background: #ffffff;
+    }
+
+    .slot-handle.left { left: 0; }
+    .slot-handle.right { right: 0; }
+
+    .slot-info-badge {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin: 0 8px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    /* Slots List */
+    .slot-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .slot-card-left {
+      flex: 1;
+    }
+
+    .slot-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slot-card-time {
+      font-size: 12px;
+      color: var(--button-color);
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    .slot-card-emoji {
+      font-size: 11px;
+      color: var(--hint-color);
+      margin-top: 3px;
+    }
+
+    .slot-card-del {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--danger);
+      border-radius: 10px;
+      width: 34px;
+      height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -631,6 +794,70 @@
       </div>
     </div>
 
+    <!-- TAB: ЭМОДЗИ-СТАТУС ПО РАСПИСАНИЮ -->
+    <div id="tab-emoji" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>✨ Premium-эмодзи статус</span>
+          <span id="emoji-status-badge" class="status-pill">Активно</span>
+        </div>
+        <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
+          Настройте интервалы суток на шкале ниже. Перемещайте отрезки и растягивайте их границы за края блоков.
+        </p>
+
+        <div class="switch-row">
+          <div class="switch-info">
+            <div class="switch-title">Авто-установка по расписанию</div>
+            <div class="switch-desc">Включение смены эмодзи рядом с именем</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="emoji-status-enabled" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <!-- 24-часовая шкала Drag & Drop -->
+        <div class="timeline-wrapper">
+          <div class="timeline-axis">
+            <span>00:00</span>
+            <span>04:00</span>
+            <span>08:00</span>
+            <span>12:00</span>
+            <span>16:00</span>
+            <span>20:00</span>
+            <span>24:00</span>
+          </div>
+          <div id="timeline-track" class="timeline-track">
+            <div id="timeline-now-line" class="timeline-now-line" style="display: none;"></div>
+            <!-- Блоки интервалов генерируются скриптом -->
+          </div>
+          <div style="font-size: 11px; color: var(--hint-color); margin-top: 8px; display: flex; justify-content: space-between;">
+            <span>💡 Перетаскивайте блок или тяните за края</span>
+            <span id="timeline-cursor-time" style="font-weight: 600; color: var(--link-color);"></span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+          <button id="add-slot-btn" class="btn btn-secondary" style="flex: 1; padding: 10px;">
+            ➕ Добавить интервал
+          </button>
+          <button id="save-slots-btn" class="btn" style="flex: 1; padding: 10px;">
+            💾 Сохранить шкалу
+          </button>
+        </div>
+
+        <!-- Список настроенных слотов с кнопками перехода в чат бота для привязки -->
+        <div class="form-label" style="margin-top: 10px;">Список интервалов суток:</div>
+        <div id="slots-list-container">
+          <!-- Рендер списка слотов -->
+        </div>
+
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 12px; padding: 12px; font-size: 12px; color: var(--text-color); margin-top: 12px;">
+          ℹ️ <b>Привязка эмодзи:</b> Чтобы привязать custom-эмодзи к интервалу, сохраните шкалу и нажмите кнопку в боте. Бот попросит отправить нужный эмодзи в сообщении.
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 4: НАСТРОЙКИ И АККАУНТ -->
     <div id="tab-settings" class="tab-content">
       <div class="card">
@@ -833,6 +1060,10 @@
       <div class="nav-icon">📝</div>
       <span>Био</span>
     </div>
+    <div class="nav-item" data-tab="tab-emoji">
+      <div class="nav-icon">✨</div>
+      <span>Статус</span>
+    </div>
     <div class="nav-item" data-tab="tab-pair-bio">
       <div class="nav-icon">👥</div>
       <span>Пара</span>
@@ -1005,6 +1236,11 @@
 
         // Рендер парного описания
         renderPairBio(data.pair_bio);
+
+        // Рендер эмодзи-статуса
+        if (data.emoji_status) {
+          renderEmojiStatus(data.emoji_status);
+        }
 
         // Проверка ранга администратора
         const adminNav = document.getElementById("nav-admin");
@@ -1460,6 +1696,342 @@
         }
       } catch (e) {
         showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    // ─── ЛОГИКА ЭМОДЗИ-СТАТУСА И ШКАЛЫ 24H ───
+    let currentEmojiSlots = [];
+    let emojiTzOffset = 3.0;
+
+    function minutesToHHMM(m) {
+      m = ((m % 1440) + 1440) % 1440;
+      const hh = Math.floor(m / 60);
+      const mm = m % 60;
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+
+    function renderEmojiStatus(statusData) {
+      if (!statusData) return;
+      document.getElementById("emoji-status-enabled").checked = Boolean(statusData.is_enabled);
+      emojiTzOffset = statusData.tz_offset || 3.0;
+      currentEmojiSlots = (statusData.slots || []).map(s => ({
+        ...s,
+        start_minutes: parseInt(s.start_minutes, 10),
+        end_minutes: parseInt(s.end_minutes, 10)
+      }));
+
+      const badge = document.getElementById("emoji-status-badge");
+      if (statusData.is_enabled) {
+        badge.className = "status-pill";
+        badge.textContent = "Включено ✅";
+      } else {
+        badge.className = "status-pill offline";
+        badge.textContent = "Выключено ⚪️";
+      }
+
+      renderTimeline();
+      renderSlotsList();
+      updateNowIndicator();
+    }
+
+    function updateNowIndicator() {
+      const line = document.getElementById("timeline-now-line");
+      const d = new Date();
+      // Рассчитываем текущее локальное время с учетом tz_offset
+      const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+      const userDate = new Date(utc + (3600000 * emojiTzOffset));
+      const curM = userDate.getHours() * 60 + userDate.getMinutes();
+      const pct = (curM / 1440) * 100;
+      line.style.left = `${pct}%`;
+      line.style.display = "block";
+    }
+
+    function checkSlotOverlap(slots, testSlot, excludeIdx = -1) {
+      function expand(s, e) {
+        s = ((s % 1440) + 1440) % 1440;
+        e = ((e % 1440) + 1440) % 1440;
+        if (s < e) return [[s, e]];
+        if (s > e) return [[s, 1440], [0, e]];
+        return [[0, 1440]];
+      }
+      const testRanges = expand(testSlot.start_minutes, testSlot.end_minutes);
+      for (let i = 0; i < slots.length; i++) {
+        if (i === excludeIdx) continue;
+        const ranges = expand(slots[i].start_minutes, slots[i].end_minutes);
+        for (const [ts, te] of testRanges) {
+          for (const [s, e] of ranges) {
+            if (Math.max(ts, s) < Math.min(te, e)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function renderTimeline() {
+      const track = document.getElementById("timeline-track");
+      // Очищаем блоки (кроме индикатора now-line)
+      const nowLine = document.getElementById("timeline-now-line");
+      track.innerHTML = "";
+      track.appendChild(nowLine);
+
+      currentEmojiSlots.forEach((slot, idx) => {
+        let s = slot.start_minutes;
+        let e = slot.end_minutes;
+        if (s < e) {
+          const leftPct = (s / 1440) * 100;
+          const widthPct = ((e - s) / 1440) * 100;
+          track.appendChild(createSlotElement(slot, idx, leftPct, widthPct));
+        } else {
+          // Переход через полночь -> два блока
+          const w1 = ((1440 - s) / 1440) * 100;
+          const l1 = (s / 1440) * 100;
+          track.appendChild(createSlotElement(slot, idx, l1, w1, true));
+
+          const w2 = (e / 1440) * 100;
+          track.appendChild(createSlotElement(slot, idx, 0, w2, true));
+        }
+      });
+    }
+
+    function createSlotElement(slot, idx, leftPct, widthPct, isSegment = false) {
+      const el = document.createElement("div");
+      el.className = "slot-block";
+      el.style.left = `${leftPct}%`;
+      el.style.width = `${Math.max(widthPct, 2)}%`;
+
+      const emojiIcon = slot.custom_emoji_id ? (slot.emoji_preview || "✨") : "⚠️";
+      const title = slot.title || `Слот #${idx + 1}`;
+
+      el.innerHTML = `
+        <div class="slot-handle left" data-handle="left" data-idx="${idx}"></div>
+        <div class="slot-info-badge">
+          <span>${emojiIcon}</span>
+          <span style="font-size: 10px;">${title}</span>
+        </div>
+        <div class="slot-handle right" data-handle="right" data-idx="${idx}"></div>
+      `;
+
+      attachDragEvents(el, idx);
+      return el;
+    }
+
+    function attachDragEvents(element, idx) {
+      let startX = 0;
+      let initialStart = 0;
+      let initialEnd = 0;
+      let isDragging = false;
+      let dragHandle = null;
+
+      const onPointerDown = (e) => {
+        e.preventDefault();
+        const target = e.target;
+        if (target.classList.contains("slot-handle")) {
+          dragHandle = target.getAttribute("data-handle");
+        } else {
+          dragHandle = "move";
+        }
+
+        isDragging = true;
+        startX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+        initialStart = currentEmojiSlots[idx].start_minutes;
+        initialEnd = currentEmojiSlots[idx].end_minutes;
+
+        element.classList.add("active-drag");
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        window.addEventListener("touchmove", onPointerMove);
+        window.addEventListener("touchend", onPointerUp);
+      };
+
+      const onPointerMove = (e) => {
+        if (!isDragging) return;
+        const currentX = e.clientX || (e.touches && e.touches[0].clientX) || 0;
+        const track = document.getElementById("timeline-track");
+        const trackWidth = track.getBoundingClientRect().width || 1;
+        const deltaMinutes = Math.round(((currentX - startX) / trackWidth) * 1440);
+        
+        // Шаг привязки: 15 минут
+        const snapMinutes = Math.round(deltaMinutes / 15) * 15;
+
+        let newStart = initialStart;
+        let newEnd = initialEnd;
+
+        if (dragHandle === "move") {
+          const duration = ((initialEnd - initialStart) + 1440) % 1440 || 120;
+          newStart = (initialStart + snapMinutes + 1440) % 1440;
+          newEnd = (newStart + duration) % 1440;
+        } else if (dragHandle === "left") {
+          newStart = (initialStart + snapMinutes + 1440) % 1440;
+          if (newStart === newEnd) newStart = (newEnd - 15 + 1440) % 1440;
+        } else if (dragHandle === "right") {
+          newEnd = (initialEnd + snapMinutes + 1440) % 1440;
+          if (newStart === newEnd) newEnd = (newStart + 15) % 1440;
+        }
+
+        currentEmojiSlots[idx].start_minutes = newStart;
+        currentEmojiSlots[idx].end_minutes = newEnd;
+
+        const hasConflict = checkSlotOverlap(currentEmojiSlots, currentEmojiSlots[idx], idx);
+        if (hasConflict) {
+          element.classList.add("conflict");
+        } else {
+          element.classList.remove("conflict");
+        }
+
+        document.getElementById("timeline-cursor-time").textContent = 
+          `${minutesToHHMM(newStart)} — ${minutesToHHMM(newEnd)}`;
+        
+        renderTimeline();
+        renderSlotsList();
+      };
+
+      const onPointerUp = () => {
+        if (!isDragging) return;
+        isDragging = false;
+        element.classList.remove("active-drag");
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("touchmove", onPointerMove);
+        window.removeEventListener("touchend", onPointerUp);
+
+        if (checkSlotOverlap(currentEmojiSlots, currentEmojiSlots[idx], idx)) {
+          showToast("Внимание: интервалы пересекаются!", "⚠️");
+        }
+        if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+      };
+
+      element.addEventListener("pointerdown", onPointerDown);
+    }
+
+    function renderSlotsList() {
+      const container = document.getElementById("slots-list-container");
+      container.innerHTML = "";
+
+      if (currentEmojiSlots.length === 0) {
+        container.innerHTML = `<div style="color: var(--hint-color); font-size: 13px; text-align: center; padding: 12px;">Нет интервалов. Нажмите «Добавить интервал» выше.</div>`;
+        return;
+      }
+
+      currentEmojiSlots.forEach((slot, idx) => {
+        const card = document.createElement("div");
+        card.className = "slot-card";
+
+        const title = slot.title || `Интервал #${idx + 1}`;
+        const timeRange = `${minutesToHHMM(slot.start_minutes)} — ${minutesToHHMM(slot.end_minutes)}`;
+        const hasEmoji = Boolean(slot.custom_emoji_id);
+        const emojiStatusText = hasEmoji 
+          ? `Эмодзи: <b>${slot.emoji_preview || '✨'}</b> <code>(${slot.custom_emoji_id.slice(0, 8)}…)</code>`
+          : `<span style="color: var(--warning);">⚠️ Эмодзи не привязан (привяжите в боте)</span>`;
+
+        card.innerHTML = `
+          <div class="slot-card-left">
+            <div class="slot-card-title">
+              <input type="text" class="input-text" style="padding: 4px 8px; font-size: 13px; width: 140px; margin-right: 6px;" value="${title.replace(/"/g, '&quot;')}" onchange="updateSlotTitle(${idx}, this.value)">
+            </div>
+            <div class="slot-card-time">⏰ ${timeRange}</div>
+            <div class="slot-card-emoji">${emojiStatusText}</div>
+          </div>
+          <button class="slot-card-del" onclick="deleteSlot(${idx})" title="Удалить">✕</button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function updateSlotTitle(idx, val) {
+      if (currentEmojiSlots[idx]) {
+        currentEmojiSlots[idx].title = val.trim() || `Интервал #${idx + 1}`;
+        renderTimeline();
+      }
+    }
+
+    function deleteSlot(idx) {
+      currentEmojiSlots.splice(idx, 1);
+      renderTimeline();
+      renderSlotsList();
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("medium");
+    }
+
+    document.getElementById("add-slot-btn").addEventListener("click", () => {
+      // Ищем свободное время (по умолчанию 09:00 - 13:00 или сдвиг)
+      let s = 540; // 09:00
+      let e = 780; // 13:00
+      if (currentEmojiSlots.length > 0) {
+        const last = currentEmojiSlots[currentEmojiSlots.length - 1];
+        s = (last.end_minutes + 60) % 1440;
+        e = (s + 180) % 1440;
+      }
+      currentEmojiSlots.push({
+        title: `Слот #${currentEmojiSlots.length + 1}`,
+        start_minutes: s,
+        end_minutes: e,
+        custom_emoji_id: null,
+        emoji_preview: "",
+        is_active: 1
+      });
+      renderTimeline();
+      renderSlotsList();
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+    });
+
+    document.getElementById("save-slots-btn").addEventListener("click", async () => {
+      // Валидация на коллизии перед отправкой
+      for (let i = 0; i < currentEmojiSlots.length; i++) {
+        if (checkSlotOverlap(currentEmojiSlots, currentEmojiSlots[i], i)) {
+          showToast(`Ошибка: слот #${i + 1} пересекается с другим!`, "⚠️");
+          return;
+        }
+      }
+
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/emoji_status/slots", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            is_enabled: document.getElementById("emoji-status-enabled").checked,
+            slots: currentEmojiSlots
+          })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          showToast("Шкала и интервалы успешно сохранены!");
+          if (d.slots) {
+            currentEmojiSlots = d.slots;
+            renderTimeline();
+            renderSlotsList();
+          }
+        } else {
+          showToast(d.error || "Ошибка сохранения", "⚠️");
+        }
+      } catch (err) {
+        showToast("Ошибка соединения", "❌");
+      }
+    });
+
+    document.getElementById("emoji-status-enabled").addEventListener("change", async (e) => {
+      const isEn = e.target.checked;
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/emoji_status/toggle", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ is_enabled: isEn })
+        });
+        const d = await res.json();
+        if (d.ok) {
+          const badge = document.getElementById("emoji-status-badge");
+          badge.className = isEn ? "status-pill" : "status-pill offline";
+          badge.textContent = isEn ? "Включено ✅" : "Выключено ⚪️";
+          showToast(d.message || "Статус изменен");
+        }
+      } catch (err) {
+        showToast("Ошибка запроса", "❌");
       }
     });
 

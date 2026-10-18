@@ -91,6 +91,7 @@ def get_start_keyboard() -> InlineKeyboardMarkup:
     buttons.extend([
         [InlineKeyboardButton("🕒 Время в имени", callback_data="time:open_start")],
         [InlineKeyboardButton("📝 Авто-описание", callback_data="desc:open_start")],
+        [InlineKeyboardButton("✨ Эмодзи-статус", callback_data="emj:open_start")],
         [InlineKeyboardButton("💎 Премиум подписка", callback_data="prem:main")],
         [InlineKeyboardButton("📖 Подробная инструкция", callback_data="instruction")],
     ])

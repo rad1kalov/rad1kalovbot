@@ -57,6 +57,12 @@ from admin_db import (
     set_admin_tag_mode,
 )
 from timezone import now_iso
+from emoji_status_db import (
+    get_user_emoji_settings,
+    get_user_emoji_slots,
+    save_user_slots_from_webapp,
+    update_user_emoji_settings,
+)
 
 log = logging.getLogger(__name__)
 
@@ -250,6 +256,16 @@ class WebAppHandler:
                 "current_step": pair_row["current_step"],
             }
 
+        # 5. Настройки эмодзи-статуса
+        emoji_settings = get_user_emoji_settings(self.conn, user_id)
+        emoji_slots = get_user_emoji_slots(self.conn, user_id)
+        emoji_data = {
+            "is_enabled": bool(emoji_settings.get("is_enabled", 1)),
+            "tz_offset": emoji_settings.get("tz_offset", offset),
+            "slots": emoji_slots,
+            "last_applied_emoji_id": emoji_settings.get("last_applied_emoji_id"),
+        }
+
         return web.json_response({
             "ok": True,
             "user": {
@@ -269,6 +285,7 @@ class WebAppHandler:
             "time": time_data,
             "bio": bio_data,
             "pair_bio": pair_bio_data,
+            "emoji_status": emoji_data,
         })
 
     # ─── Управление временем и профилем ───
@@ -513,6 +530,80 @@ class WebAppHandler:
 
         return web.json_response({"ok": True, "message": "Парное описание отключено"})
 
+    # ─── Управление слотами эмодзи-статуса (Emoji Status) ───
+
+    async def handle_get_emoji_slots(self, request: web.Request) -> web.Response:
+        """Возвращает слоты и настройки эмодзи-статуса пользователя."""
+        user, err_resp = self._get_user_or_401(request)
+        if err_resp:
+            return err_resp
+
+        user_id = int(user["id"])
+        settings = get_user_emoji_settings(self.conn, user_id)
+        slots = get_user_emoji_slots(self.conn, user_id)
+        return web.json_response({
+            "ok": True,
+            "is_enabled": bool(settings.get("is_enabled", 1)),
+            "tz_offset": settings.get("tz_offset", 3.0),
+            "slots": slots,
+            "last_applied_emoji_id": settings.get("last_applied_emoji_id"),
+        })
+
+    async def handle_save_emoji_slots(self, request: web.Request) -> web.Response:
+        """Сохраняет слоты расписания, настроенные через drag-and-drop в Mini App."""
+        user, err_resp = self._get_user_or_401(request)
+        if err_resp:
+            return err_resp
+
+        user_id = int(user["id"])
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+        slots_data = body.get("slots", [])
+        tz_offset = body.get("tz_offset")
+        is_enabled = body.get("is_enabled")
+
+        if tz_offset is not None or is_enabled is not None:
+            update_user_emoji_settings(
+                self.conn,
+                user_id,
+                is_enabled=bool(is_enabled) if is_enabled is not None else None,
+                tz_offset=float(tz_offset) if tz_offset is not None else None,
+            )
+
+        ok, msg = save_user_slots_from_webapp(self.conn, user_id, slots_data)
+        if not ok:
+            return web.json_response({"ok": False, "error": msg}, status=400)
+
+        slots = get_user_emoji_slots(self.conn, user_id)
+        return web.json_response({
+            "ok": True,
+            "message": "Расписание интервалов сохранено!",
+            "slots": slots,
+        })
+
+    async def handle_toggle_emoji_status(self, request: web.Request) -> web.Response:
+        """Включение/выключение авто-статуса."""
+        user, err_resp = self._get_user_or_401(request)
+        if err_resp:
+            return err_resp
+
+        user_id = int(user["id"])
+        try:
+            body = await request.json()
+            is_enabled = bool(body.get("is_enabled", True))
+        except Exception:
+            return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+        update_user_emoji_settings(self.conn, user_id, is_enabled=is_enabled)
+        return web.json_response({
+            "ok": True,
+            "is_enabled": is_enabled,
+            "message": "Авто-статус включен" if is_enabled else "Авто-статус выключен"
+        })
+
     # ─── Административная панель (Admin Panel) ───
 
     async def handle_admin_overview(self, request: web.Request) -> web.Response:
@@ -687,6 +778,11 @@ async def create_webapp_app(ptb_app, conn: sqlite3.Connection, bot_token: str, o
     # API парного био
     app.router.add_post("/api/settings/pair_bio", handler.handle_create_pair_bio)
     app.router.add_post("/api/action/cancel_pair_bio", handler.handle_cancel_pair_bio)
+
+    # API эмодзи-статусов
+    app.router.add_get("/api/emoji_status/slots", handler.handle_get_emoji_slots)
+    app.router.add_post("/api/emoji_status/slots", handler.handle_save_emoji_slots)
+    app.router.add_post("/api/emoji_status/toggle", handler.handle_toggle_emoji_status)
 
     # API админки
     app.router.add_get("/api/admin/overview", handler.handle_admin_overview)
