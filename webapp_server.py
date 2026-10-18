@@ -779,6 +779,7 @@ class WebAppHandler:
 
         flt = request.query.get("filter", "all").strip().lower()
         search = request.query.get("search", "").strip()
+        bc_q = request.query.get("business_connection_id", "").strip()
         chat_id_q = request.query.get("chat_id", "").strip()
         dialog_id_q = request.query.get("dialog_id", "").strip()
         owner_id_q = request.query.get("owner_id", "").strip()
@@ -825,41 +826,31 @@ class WebAppHandler:
         elif flt == "media":
             where_clauses.append("(media_type IS NOT NULL AND media_type != '')")
 
-        # Фильтр по конкретному диалогу (включает сообщения ОБОИХ участников: собеседника и владельца бизнес-аккаунта)
-        if dialog_id_q and "_" in dialog_id_q:
-            try:
-                u1_str, u2_str = dialog_id_q.split("_")[:2]
-                u1, u2 = int(u1_str), int(u2_str)
-                where_clauses.append("""(
-                    (chat_id = ? AND from_user_id = ?)
-                    OR (chat_id = ? AND from_user_id = ?)
-                    OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
-                    OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
-                    OR (chat_id = ? AND from_user_id = ?)
-                    OR (chat_id = ? AND from_user_id = ?)
-                )""")
-                params.extend([u1, u2, u2, u1, u1, u2, u2, u1, u1, u1, u2, u2])
-            except (ValueError, TypeError):
-                pass
-        elif chat_id_q:
-            try:
-                cid = int(chat_id_q)
-                oid = int(owner_id_q) if owner_id_q and owner_id_q.isdigit() else None
-                if oid and oid != cid:
-                    where_clauses.append("""(
-                        (chat_id = ? AND from_user_id = ?)
-                        OR (chat_id = ? AND from_user_id = ?)
-                        OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
-                        OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
-                        OR (chat_id = ? AND from_user_id = ?)
-                        OR (chat_id = ? AND from_user_id = ?)
-                    )""")
-                    params.extend([cid, oid, oid, cid, cid, oid, oid, cid, cid, cid, oid, oid])
-                else:
-                    where_clauses.append("chat_id = ?")
-                    params.append(cid)
-            except ValueError:
-                pass
+        # Фильтр по конкретному диалогу (ТОЛЬКО из выбранного чата: business_connection_id + chat_id)
+        target_bc = None
+        target_chat_id = None
+
+        if dialog_id_q and ":" in dialog_id_q:
+            parts = dialog_id_q.split(":", 1)
+            target_bc = parts[0]
+            if parts[1].lstrip("-").isdigit():
+                target_chat_id = int(parts[1])
+        else:
+            if bc_q:
+                target_bc = bc_q
+            if chat_id_q and chat_id_q.lstrip("-").isdigit():
+                target_chat_id = int(chat_id_q)
+
+        if target_chat_id is not None:
+            if target_bc and target_bc not in ("direct", "none", "null"):
+                where_clauses.append("business_connection_id = ? AND chat_id = ?")
+                params.extend([target_bc, target_chat_id])
+            elif target_bc == "direct":
+                where_clauses.append("business_connection_id IS NULL AND chat_id = ?")
+                params.append(target_chat_id)
+            else:
+                where_clauses.append("chat_id = ?")
+                params.append(target_chat_id)
 
         if search:
             like_s = f"%{search}%"
@@ -888,12 +879,23 @@ class WebAppHandler:
         user_map = {}
         for r in self.conn.execute("SELECT user_id, first_name, username FROM bot_users").fetchall():
             user_map[r[0]] = (r[1] or "", r[2] or "")
+        for r in self.conn.execute("SELECT from_user_id, from_user_name FROM messages WHERE from_user_id IS NOT NULL AND from_user_name IS NOT NULL").fetchall():
+            uid = r[0]
+            uname = r[1] or ""
+            if uid not in user_map or not user_map[uid][0]:
+                existing_u = user_map.get(uid, ("", ""))[1]
+                user_map[uid] = (uname, existing_u)
 
         conn_map = {}
-        for r in self.conn.execute("SELECT business_connection_id, user_id, first_name FROM settings WHERE business_connection_id IS NOT NULL").fetchall():
-            conn_map[r[0]] = (r[1], r[2] or "")
+        for r in self.conn.execute("""
+            SELECT s.business_connection_id, s.user_id, s.first_name, u.username
+            FROM settings s
+            LEFT JOIN bot_users u ON s.user_id = u.user_id
+            WHERE s.business_connection_id IS NOT NULL
+        """).fetchall():
+            conn_map[r[0]] = (r[1], r[2] or "", r[3] or "")
 
-        # Формируем объединённый список диалогов со статистикой
+        # Формируем список диалогов со статистикой: каждый чат конкретного пользователя бота
         all_msgs_meta = self.conn.execute("""
             SELECT message_id, chat_id, from_user_id, from_user_name, text, media_type,
                    date, business_connection_id, is_deleted, is_edited, is_ephemeral
@@ -901,42 +903,61 @@ class WebAppHandler:
             ORDER BY date DESC, message_id DESC
         """).fetchall()
 
+        def format_user_label(name: str, username: str, uid: Any) -> str:
+            parts = []
+            if name:
+                parts.append(name.strip())
+            if username:
+                clean_u = username.strip().lstrip("@")
+                if clean_u:
+                    parts.append(f"(@{clean_u})")
+            if not parts and uid:
+                parts.append(f"ID {uid}")
+            return " ".join(parts) if parts else "Пользователь"
+
         dialogue_map = {}
         for m in all_msgs_meta:
             (m_id, c_id, f_uid, f_uname, txt, m_type, dt, bc_id, is_del, is_ed, is_eph) = m
-            conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
-            
-            # Определяем двух участников диалога
-            if conn_owner_id:
-                p_owner = conn_owner_id
-                p_interlocutor = c_id if f_uid == conn_owner_id else f_uid
-            else:
-                p_owner = self.owner_id
-                p_interlocutor = c_id
+            chat_key = (bc_id or "direct", c_id)
 
-            if not p_interlocutor:
-                p_interlocutor = c_id
+            if chat_key not in dialogue_map:
+                conn_owner_id, conn_owner_name, conn_owner_username = conn_map.get(bc_id, (None, None, None))
+                if not conn_owner_id:
+                    if f_uid and f_uid != c_id:
+                        conn_owner_id = f_uid
+                        fn, un = user_map.get(f_uid, (f_uname or "", ""))
+                        conn_owner_name = fn or f_uname
+                        conn_owner_username = un
+                    else:
+                        conn_owner_id = self.owner_id
+                        fn, un = user_map.get(self.owner_id, ("Владелец", ""))
+                        conn_owner_name = fn
+                        conn_owner_username = un
 
-            pair = tuple(sorted([p_owner, p_interlocutor]))
-            if pair not in dialogue_map:
-                # Если один из участников владелец бота, собеседник — другой
-                if self.owner_id in pair:
-                    interlocutor_id = pair[0] if pair[1] == self.owner_id else pair[1]
-                    business_owner_id = self.owner_id
-                else:
-                    interlocutor_id = p_interlocutor
-                    business_owner_id = p_owner
+                bot_user_display = format_user_label(conn_owner_name, conn_owner_username, conn_owner_id)
 
-                c_name, c_user = user_map.get(interlocutor_id, ("", ""))
-                title = c_name or (f"@{c_user}" if c_user else f"Чат {interlocutor_id}")
+                interlocutor_name, interlocutor_username = user_map.get(c_id, ("", ""))
+                if not interlocutor_name and f_uid == c_id and f_uname:
+                    interlocutor_name = f_uname
 
-                b_owner_name = conn_map.get(bc_id, (None, None))[1] or user_map.get(business_owner_id, ("Владелец", ""))[0]
+                interlocutor_display = format_user_label(interlocutor_name, interlocutor_username, c_id)
 
-                dialogue_map[pair] = {
-                    "dialog_id": f"{pair[0]}_{pair[1]}",
-                    "chat_id": interlocutor_id,
+                # Название: пользователь бота -> собеседник
+                title = f"{bot_user_display} ➔ {interlocutor_display}"
+
+                dialogue_map[chat_key] = {
+                    "dialog_id": f"{bc_id or 'direct'}:{c_id}",
+                    "business_connection_id": bc_id or "",
+                    "chat_id": c_id,
                     "title": title,
-                    "username": c_user,
+                    "bot_user_id": conn_owner_id,
+                    "bot_user_name": conn_owner_name or "Пользователь бота",
+                    "bot_user_username": conn_owner_username or "",
+                    "bot_user_display": bot_user_display,
+                    "interlocutor_id": c_id,
+                    "interlocutor_name": interlocutor_name or f"Чат {c_id}",
+                    "interlocutor_username": interlocutor_username or "",
+                    "interlocutor_display": interlocutor_display,
                     "count": 0,
                     "last_date": dt,
                     "deleted_count": 0,
@@ -944,19 +965,25 @@ class WebAppHandler:
                     "ephemeral_count": 0,
                     "last_snippet": "",
                     "last_sender": "",
-                    "connection_owner_id": business_owner_id,
-                    "connection_owner_name": b_owner_name,
+                    "connection_owner_id": conn_owner_id,
+                    "connection_owner_name": conn_owner_name or "Пользователь бота",
                 }
 
-            d = dialogue_map[pair]
+            d = dialogue_map[chat_key]
             d["count"] += 1
-            if is_del: d["deleted_count"] += 1
-            if is_ed: d["edited_count"] += 1
-            if is_eph: d["ephemeral_count"] += 1
+            if is_del:
+                d["deleted_count"] += 1
+            if is_ed:
+                d["edited_count"] += 1
+            if is_eph:
+                d["ephemeral_count"] += 1
             if not d["last_snippet"]:
-                if txt: d["last_snippet"] = txt
-                elif m_type: d["last_snippet"] = f"[{m_type}]"
-                elif is_del: d["last_snippet"] = "(сообщение удалено)"
+                if txt:
+                    d["last_snippet"] = txt
+                elif m_type:
+                    d["last_snippet"] = f"[{m_type}]"
+                elif is_del:
+                    d["last_snippet"] = "(сообщение удалено)"
                 d["last_sender"] = f_uname or user_map.get(f_uid, ("Пользователь", ""))[0] or "Пользователь"
 
         chats_list = sorted(dialogue_map.values(), key=lambda x: x["last_date"] or "", reverse=True)[:100]
@@ -966,9 +993,13 @@ class WebAppHandler:
             (m_id, c_id, f_uid, f_uname, txt, m_path, m_type, dt, bc_id,
              is_eph, is_del, del_at, is_ed, ed_at, orig_txt) = r
 
+            conn_owner_id, conn_owner_name, conn_owner_username = conn_map.get(bc_id, (None, None, None))
+            if not conn_owner_id:
+                conn_owner_id = self.owner_id
+                conn_owner_name, conn_owner_username = user_map.get(self.owner_id, ("Владелец", ""))
+
             sender_name, sender_user = user_map.get(f_uid, (f_uname or "Пользователь", None))
             chat_name, chat_user = user_map.get(c_id, (f"Чат {c_id}", None))
-            conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
 
             has_file = bool(m_path and os.path.exists(m_path))
             media_token = None
@@ -992,6 +1023,7 @@ class WebAppHandler:
                 "business_connection_id": bc_id,
                 "connection_owner_id": conn_owner_id,
                 "connection_owner_name": conn_owner_name,
+                "connection_owner_username": conn_owner_username,
                 "is_ephemeral": bool(is_eph),
                 "is_deleted": bool(is_del),
                 "deleted_at": del_at,

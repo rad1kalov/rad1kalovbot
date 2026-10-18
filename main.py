@@ -170,6 +170,7 @@ def init_db() -> sqlite3.Connection:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_deleted ON messages(is_deleted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_edited ON messages(is_edited)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_bc_chat ON messages(business_connection_id, chat_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date DESC)")
     except Exception as e:
         logging.error(f"Migration error in init_db: {e}")

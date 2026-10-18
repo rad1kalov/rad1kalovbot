@@ -2661,6 +2661,7 @@
 
     // Состояние открытого чата
     let activeChatId = null;
+    let activeChatBcId = null;
     let activeChatDialogId = null;
     let activeChatTitle = '';
     let activeChatOwnerName = '';
@@ -2773,8 +2774,10 @@
       }
 
       const initData = tg?.initData || "";
+      const urlParams = new URLSearchParams(window.location.search);
+      const devQuery = urlParams.get("dev") === "1" ? `&dev=1&user_id=${urlParams.get("user_id") || "8470104943"}` : "";
       try {
-        const res = await fetch(`/api/owner/messages?limit=1`, {
+        const res = await fetch(`/api/owner/messages?limit=1${devQuery}`, {
           headers: { "Authorization": `tma ${initData}` }
         });
         if (!res.ok) {
@@ -2841,6 +2844,10 @@
         filtered = filtered.filter(ch => {
           return (ch.title && ch.title.toLowerCase().includes(s)) ||
                  (ch.username && ch.username.toLowerCase().includes(s)) ||
+                 (ch.bot_user_name && ch.bot_user_name.toLowerCase().includes(s)) ||
+                 (ch.bot_user_username && ch.bot_user_username.toLowerCase().includes(s)) ||
+                 (ch.interlocutor_name && ch.interlocutor_name.toLowerCase().includes(s)) ||
+                 (ch.interlocutor_username && ch.interlocutor_username.toLowerCase().includes(s)) ||
                  String(ch.chat_id).includes(s) ||
                  (ch.last_snippet && ch.last_snippet.toLowerCase().includes(s)) ||
                  (ch.last_sender && ch.last_sender.toLowerCase().includes(s)) ||
@@ -2873,7 +2880,7 @@
       const item = document.createElement("div");
       item.className = "dialog-item" + (ch.deleted_count > 0 ? " has-deleted" : "");
 
-      const initial = (ch.title || "Ч")[0].toUpperCase();
+      const initial = "💬";
       const timeStr = ch.last_date ? formatDialogDate(ch.last_date) : "";
 
       let badges = "";
@@ -2888,9 +2895,12 @@
       }
       badges += `<span class="dialog-badge cnt">${ch.count} сообщ.</span>`;
 
-      let subText = ch.username ? `@${escapeHtml(ch.username)}` : `ID: ${ch.chat_id}`;
-      if (ch.connection_owner_name) {
-        subText += ` • 👤 ${escapeHtml(ch.connection_owner_name)}`;
+      let subText = `💬 Собеседник ID: ${ch.chat_id}`;
+      if (ch.interlocutor_username) {
+        subText += ` (@${escapeHtml(ch.interlocutor_username)})`;
+      }
+      if (ch.bot_user_display || ch.connection_owner_name) {
+        subText += ` • 👤 Бот-юзер: ${escapeHtml(ch.bot_user_name || ch.connection_owner_name)}`;
       }
 
       let snippet = escapeHtml(ch.last_snippet || "Нет сообщений");
@@ -2916,7 +2926,14 @@
       `;
 
       item.onclick = () => {
-        openChatDialogue(ch.chat_id, ch.title, ch.connection_owner_name || "", ch.connection_owner_id, ch.dialog_id);
+        openChatDialogue(
+          ch.chat_id,
+          ch.title,
+          ch.bot_user_name || ch.connection_owner_name || "",
+          ch.bot_user_id || ch.connection_owner_id,
+          ch.dialog_id,
+          ch.business_connection_id || ""
+        );
       };
 
       return item;
@@ -2924,8 +2941,9 @@
 
     // ─── Открытие и управление чат-диалогом ───
 
-    function openChatDialogue(chatId, title, ownerName, ownerId, dialogId) {
+    function openChatDialogue(chatId, title, ownerName, ownerId, dialogId, bcId) {
       activeChatId = chatId;
+      activeChatBcId = bcId || "";
       activeChatDialogId = dialogId || null;
       activeChatTitle = title || `Чат ${chatId}`;
       activeChatOwnerName = ownerName || "";
@@ -2937,12 +2955,18 @@
       const activeChatView = document.getElementById("active-chat-view");
       activeChatView.style.display = "block";
 
+      // Telegram BackButton
+      if (tg?.BackButton) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(closeChatDialogue);
+      }
+
       // Заголовок и подзаголовок
-      document.getElementById("active-chat-avatar").textContent = (activeChatTitle[0] || "💬").toUpperCase();
+      document.getElementById("active-chat-avatar").textContent = "💬";
       document.getElementById("active-chat-title").textContent = activeChatTitle;
-      let subtitle = `ID: ${chatId}`;
+      let subtitle = `Собеседник ID: ${chatId}`;
       if (activeChatOwnerName) {
-        subtitle += ` • Бизнес: ${activeChatOwnerName}`;
+        subtitle += ` • Пользователь бота: ${activeChatOwnerName}`;
       }
       document.getElementById("active-chat-subtitle").textContent = subtitle;
 
@@ -2968,7 +2992,12 @@
 
     function closeChatDialogue() {
       activeChatId = null;
+      activeChatBcId = null;
       activeChatDialogId = null;
+      if (tg?.BackButton) {
+        tg.BackButton.hide();
+        tg.BackButton.offClick(closeChatDialogue);
+      }
       document.getElementById("active-chat-view").style.display = "none";
       document.getElementById("dialogs-list-view").style.display = "block";
 
@@ -3016,8 +3045,15 @@
         limit: "250",
         filter: filter
       });
+      if (activeChatBcId) params.set("business_connection_id", activeChatBcId);
       if (activeChatDialogId) params.set("dialog_id", activeChatDialogId);
       if (activeChatOwnerId) params.set("owner_id", String(activeChatOwnerId));
+
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("dev") === "1") {
+        params.set("dev", "1");
+        if (urlParams.get("user_id")) params.set("user_id", urlParams.get("user_id"));
+      }
 
       try {
         const res = await fetch(`/api/owner/messages?${params.toString()}`, {
@@ -3094,11 +3130,11 @@
     }
 
     function createChatBubble(msg) {
-      // Сообщение исходящее (справа), если отправлено тем, к кому подключен бот
+      // Сообщение исходящее (справа), если отправлено пользователем бота (владельцем бизнес-аккаунта)
       let isOutgoing = false;
-      if (activeChatOwnerId && msg.from_user_id === activeChatOwnerId) {
+      if (msg.connection_owner_id && msg.from_user_id === msg.connection_owner_id) {
         isOutgoing = true;
-      } else if (msg.connection_owner_id && msg.from_user_id === msg.connection_owner_id) {
+      } else if (activeChatOwnerId && msg.from_user_id === activeChatOwnerId) {
         isOutgoing = true;
       } else if (activeChatId && msg.from_user_id !== activeChatId) {
         isOutgoing = true;
@@ -3114,10 +3150,13 @@
       const bubble = document.createElement("div");
       bubble.className = bubbleClass;
 
-      // Заголовок отправителя
-      const senderName = escapeHtml(msg.from_user_name || (isOutgoing ? "Владелец" : "Собеседник"));
+      // Заголовок отправителя с ролью
+      const roleBadge = isOutgoing 
+        ? '<span style="font-size: 10px; font-weight: normal; opacity: 0.85; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.2); margin-left: 6px;">Пользователь бота</span>'
+        : '<span style="font-size: 10px; font-weight: normal; opacity: 0.85; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.12); margin-left: 6px;">Собеседник</span>';
+      const senderName = escapeHtml(msg.from_user_name || (isOutgoing ? "Пользователь бота" : "Собеседник"));
       const senderSub = msg.from_username ? ` (@${escapeHtml(msg.from_username)})` : "";
-      let senderHtml = `<div class="bubble-sender">${senderName}${senderSub}</div>`;
+      let senderHtml = `<div class="bubble-sender">${senderName}${senderSub}${roleBadge}</div>`;
 
       // Бейджи (Удалено, Отредактировано, Одноразовое, Медиа)
       let badgesHtml = "";
@@ -3145,7 +3184,7 @@
             <div class="bubble-diff-new">🔺 <b>Стало:</b> ${escapeHtml(msg.text || '(сообщение очищено)')}</div>
           </div>
         `;
-      } else if (msg.text) {
+      } else if (msg.text && msg.text !== "(сообщение удалено)") {
         contentHtml = `<div class="bubble-text">${escapeHtml(msg.text)}</div>`;
       } else if (msg.is_deleted) {
         contentHtml = `<div class="bubble-text" style="color: var(--hint-color); font-style: italic;">(содержимое удалено)</div>`;
