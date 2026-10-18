@@ -57,6 +57,7 @@ from admin_db import (
     set_admin_tag_mode,
 )
 from timezone import now_iso
+from autostop_db import is_autostop_active, toggle_autostop
 from emoji_status_db import (
     get_user_emoji_settings,
     get_user_emoji_slots,
@@ -160,6 +161,15 @@ class WebAppHandler:
         user_id = int(user["id"])
         if not is_admin(self.conn, user_id):
             return None, web.json_response({"ok": False, "error": "Доступ запрещен: требуется ранг администратора"}, status=403)
+        return user, None
+
+    def _require_owner(self, request: web.Request) -> Tuple[Optional[Dict[str, Any]], Optional[web.Response]]:
+        user, err_resp = self._get_user_or_401(request)
+        if err_resp:
+            return None, err_resp
+        user_id = int(user["id"])
+        if user_id != self.owner_id:
+            return None, web.json_response({"ok": False, "error": "Доступ запрещен: требуется статус владельца бота"}, status=403)
         return user, None
 
     async def handle_index(self, request: web.Request) -> web.Response:
@@ -274,6 +284,7 @@ class WebAppHandler:
                 "username": user.get("username", ""),
                 "is_premium": user_prem,
                 "is_admin": is_adm,
+                "is_owner": (user_id == self.owner_id),
                 "admin_rank": admin_rank,
                 "tag_mode": tag_mode,
             },
@@ -756,6 +767,186 @@ class WebAppHandler:
         set_admin_tag_mode(self.conn, user_id, tag_mode)
         return web.json_response({"ok": True, "message": f"Режим тега изменен на {tag_mode}"})
 
+    # ─── Логирование сообщений для владельца (Debug) ───
+
+    async def handle_owner_get_messages(self, request: web.Request) -> web.Response:
+        """Возвращает сообщения из всех чатов бота с пометками об удалении/редактировании для отладки владельцем."""
+        user, err_resp = self._require_owner(request)
+        if err_resp:
+            return err_resp
+
+        flt = request.query.get("filter", "all").strip().lower()
+        search = request.query.get("search", "").strip()
+        chat_id_q = request.query.get("chat_id", "").strip()
+        try:
+            limit = min(max(int(request.query.get("limit", 40)), 1), 100)
+        except (ValueError, TypeError):
+            limit = 40
+        try:
+            offset = max(int(request.query.get("offset", 0)), 0)
+        except (ValueError, TypeError):
+            offset = 0
+
+        # Общая статистика по всем сообщениям
+        stat_row = self.conn.execute("""
+            SELECT 
+                COUNT(*), 
+                COALESCE(SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN is_ephemeral = 1 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN media_type IS NOT NULL AND media_type != '' THEN 1 ELSE 0 END), 0)
+            FROM messages
+        """).fetchone()
+
+        summary_stats = {
+            "all": stat_row[0] or 0,
+            "deleted": stat_row[1] or 0,
+            "edited": stat_row[2] or 0,
+            "ephemeral": stat_row[3] or 0,
+            "media": stat_row[4] or 0,
+        }
+
+        where_clauses = []
+        params: List[Any] = []
+
+        if flt == "deleted":
+            where_clauses.append("is_deleted = 1")
+        elif flt == "edited":
+            where_clauses.append("is_edited = 1")
+        elif flt == "ephemeral":
+            where_clauses.append("is_ephemeral = 1")
+        elif flt == "media":
+            where_clauses.append("(media_type IS NOT NULL AND media_type != '')")
+
+        if chat_id_q:
+            try:
+                where_clauses.append("chat_id = ?")
+                params.append(int(chat_id_q))
+            except ValueError:
+                pass
+
+        if search:
+            like_s = f"%{search}%"
+            where_clauses.append(
+                "(text LIKE ? OR original_text LIKE ? OR from_user_name LIKE ? OR CAST(chat_id AS TEXT) LIKE ? OR CAST(from_user_id AS TEXT) LIKE ?)"
+            )
+            params.extend([like_s, like_s, like_s, like_s, like_s])
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        count_sql = f"SELECT COUNT(*) FROM messages {where_sql}"
+        filtered_total = self.conn.execute(count_sql, params).fetchone()[0]
+
+        data_sql = f"""
+            SELECT message_id, chat_id, from_user_id, from_user_name, text,
+                   media_path, media_type, date, business_connection_id,
+                   is_ephemeral, is_deleted, deleted_at, is_edited, edited_at, original_text
+            FROM messages
+            {where_sql}
+            ORDER BY date DESC, message_id DESC
+            LIMIT ? OFFSET ?
+        """
+        rows = self.conn.execute(data_sql, params + [limit, offset]).fetchall()
+
+        # Маппинг пользователей и подключений
+        user_map = {}
+        for r in self.conn.execute("SELECT user_id, first_name, username FROM bot_users").fetchall():
+            user_map[r[0]] = (r[1] or "", r[2] or "")
+
+        conn_map = {}
+        for r in self.conn.execute("SELECT business_connection_id, user_id, first_name FROM settings WHERE business_connection_id IS NOT NULL").fetchall():
+            conn_map[r[0]] = (r[1], r[2] or "")
+
+        # Список уникальных чатов для выпадающего списка фильтра
+        chat_rows = self.conn.execute("""
+            SELECT chat_id, COUNT(*) as cnt, MAX(date) as last_d
+            FROM messages
+            GROUP BY chat_id
+            ORDER BY last_d DESC
+            LIMIT 50
+        """).fetchall()
+
+        chats_list = []
+        for cr in chat_rows:
+            cid = cr[0]
+            c_name, c_user = user_map.get(cid, ("", ""))
+            title = c_name or (f"@{c_user}" if c_user else f"Чат {cid}")
+            chats_list.append({
+                "chat_id": cid,
+                "title": title,
+                "count": cr[1],
+            })
+
+        msg_list = []
+        for r in rows:
+            (m_id, c_id, f_uid, f_uname, txt, m_path, m_type, dt, bc_id,
+             is_eph, is_del, del_at, is_ed, ed_at, orig_txt) = r
+
+            sender_name, sender_user = user_map.get(f_uid, (f_uname or "Пользователь", None))
+            chat_name, chat_user = user_map.get(c_id, (f"Чат {c_id}", None))
+            conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
+
+            has_file = bool(m_path and os.path.exists(m_path))
+
+            msg_list.append({
+                "message_id": m_id,
+                "chat_id": c_id,
+                "chat_title": chat_name,
+                "from_user_id": f_uid,
+                "from_user_name": sender_name or f_uname or "Пользователь",
+                "from_username": sender_user,
+                "text": txt or "",
+                "original_text": orig_txt,
+                "media_path": m_path,
+                "has_media_file": has_file,
+                "media_type": m_type,
+                "date": dt,
+                "business_connection_id": bc_id,
+                "connection_owner_id": conn_owner_id,
+                "connection_owner_name": conn_owner_name,
+                "is_ephemeral": bool(is_eph),
+                "is_deleted": bool(is_del),
+                "deleted_at": del_at,
+                "is_edited": bool(is_ed),
+                "edited_at": ed_at,
+            })
+
+        return web.json_response({
+            "ok": True,
+            "total": filtered_total,
+            "summary_stats": summary_stats,
+            "autostop_active": is_autostop_active(self.conn),
+            "limit": limit,
+            "offset": offset,
+            "messages": msg_list,
+            "chats": chats_list,
+        })
+
+    async def handle_owner_get_media(self, request: web.Request) -> web.Response:
+        """Отдает сохраненный медиафайл владельцу для просмотра в webapp."""
+        user, err_resp = self._require_owner(request)
+        if err_resp:
+            return err_resp
+
+        rel_path = request.query.get("path", "").strip()
+        if not rel_path:
+            return web.Response(text="Path is required", status=400)
+
+        safe_path = os.path.abspath(rel_path)
+        if not os.path.exists(safe_path) or not os.path.isfile(safe_path):
+            return web.Response(text="File not found", status=404)
+
+        return web.FileResponse(safe_path)
+
+    async def handle_owner_toggle_autostop(self, request: web.Request) -> web.Response:
+        """Переключает перехват удаленных и одноразовых сообщений."""
+        user, err_resp = self._require_owner(request)
+        if err_resp:
+            return err_resp
+
+        new_val = toggle_autostop(self.conn)
+        return web.json_response({"ok": True, "is_active": new_val})
+
 
 async def create_webapp_app(ptb_app, conn: sqlite3.Connection, bot_token: str, owner_id: int) -> web.Application:
     """Создает и настраивает web.Application для Mini App со всеми маршрутами."""
@@ -791,6 +982,11 @@ async def create_webapp_app(ptb_app, conn: sqlite3.Connection, bot_token: str, o
     app.router.add_post("/api/admin/grant_feature", handler.handle_admin_grant_feature)
     app.router.add_post("/api/admin/broadcast", handler.handle_admin_broadcast)
     app.router.add_post("/api/admin/tag_mode", handler.handle_admin_set_tag_mode)
+
+    # API логирования для владельца (Debug)
+    app.router.add_get("/api/owner/messages", handler.handle_owner_get_messages)
+    app.router.add_get("/api/owner/media", handler.handle_owner_get_media)
+    app.router.add_post("/api/owner/toggle_autostop", handler.handle_owner_toggle_autostop)
 
     return app
 

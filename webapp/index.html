@@ -581,6 +581,280 @@
       cursor: pointer;
       font-size: 14px;
     }
+
+    /* Logs & Debug Section */
+    .subtabs-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      background: rgba(15, 23, 42, 0.4);
+      padding: 4px;
+      border-radius: 14px;
+      border: 1px solid var(--card-border);
+    }
+
+    .subtab-btn {
+      flex: 1;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 10px;
+      border: none;
+      background: transparent;
+      color: var(--hint-color);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .subtab-btn.active {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .log-filter-chips {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 4px 0 8px 0;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .log-filter-chips::-webkit-scrollbar { display: none; }
+
+    .chip-btn {
+      flex-shrink: 0;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 20px;
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--hint-color);
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .chip-btn.active {
+      background: var(--button-color);
+      color: #fff;
+      border-color: var(--button-color);
+      box-shadow: 0 2px 10px rgba(59, 130, 246, 0.3);
+    }
+
+    .chip-btn .badge-count {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .log-card {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 12px;
+      position: relative;
+      transition: transform 0.15s, border-color 0.2s;
+    }
+    .log-card:active {
+      transform: scale(0.99);
+    }
+    .log-card.deleted-card {
+      border-left: 4px solid #ef4444;
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.08), rgba(30, 41, 59, 0.7) 40%);
+    }
+    .log-card.edited-card {
+      border-left: 4px solid #f59e0b;
+      background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), rgba(30, 41, 59, 0.7) 40%);
+    }
+    .log-card.ephemeral-card {
+      border-left: 4px solid #f97316;
+      background: linear-gradient(90deg, rgba(249, 115, 22, 0.08), rgba(30, 41, 59, 0.7) 40%);
+    }
+
+    .log-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .log-sender-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .log-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #475569, #334155);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .log-sender-meta {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .log-sender-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-color);
+    }
+
+    .log-sender-sub {
+      font-size: 11px;
+      color: var(--hint-color);
+    }
+
+    .log-timestamp {
+      font-size: 11px;
+      color: var(--hint-color);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    .log-badges-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .badge-pill {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    .badge-deleted {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .badge-edited {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .badge-ephemeral {
+      background: rgba(249, 115, 22, 0.2);
+      color: #fb923c;
+      border: 1px solid rgba(249, 115, 22, 0.4);
+    }
+
+    .badge-media {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .badge-chat-tag {
+      background: rgba(255, 255, 255, 0.05);
+      color: #cbd5e1;
+      border: 1px solid var(--card-border);
+    }
+
+    .log-body {
+      margin-bottom: 8px;
+    }
+
+    .msg-text-bubble {
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text-color);
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+      padding: 10px 12px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .diff-container {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+      padding: 10px;
+      font-size: 12px;
+    }
+
+    .diff-section {
+      margin-bottom: 6px;
+    }
+    .diff-section:last-child { margin-bottom: 0; }
+
+    .diff-label {
+      font-weight: 700;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 2px;
+    }
+    .diff-label.old { color: #f87171; }
+    .diff-label.new { color: #34d399; }
+
+    .diff-content {
+      background: rgba(0, 0, 0, 0.25);
+      padding: 6px 8px;
+      border-radius: 6px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+
+    .log-media-preview {
+      margin-top: 8px;
+    }
+
+    .log-media-thumb {
+      max-width: 100%;
+      max-height: 220px;
+      border-radius: 8px;
+      object-fit: cover;
+      cursor: pointer;
+      border: 1px solid var(--card-border);
+      display: block;
+    }
+
+    .log-footer {
+      font-size: 11px;
+      color: var(--hint-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+      padding-top: 8px;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -600,8 +874,13 @@
         <p id="user-username">@username</p>
       </div>
     </div>
-    <div id="business-status" class="status-pill">
-      <span>●</span> Бизнес подключен
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <div id="owner-debug-pill" class="status-pill" style="display: none; cursor: pointer; background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.4);" onclick="openDebugLogs()">
+        📡 Debug логи
+      </div>
+      <div id="business-status" class="status-pill">
+        <span>●</span> Бизнес подключен
+      </div>
     </div>
   </div>
 
@@ -956,90 +1235,181 @@
 
     <!-- TAB 6: АДМИН-ПАНЕЛЬ (только для рангов) -->
     <div id="tab-admin" class="tab-content">
-      <div class="card" style="border-color: rgba(234, 179, 8, 0.4);">
-        <div class="card-title">
-          <span>👑 Панель управления</span>
-          <span id="admin-rank-badge" class="status-pill" style="background: rgba(234, 179, 8, 0.2); color: #eab308;">Администратор</span>
-        </div>
-        <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
-          Вкладка доступна только владельцу и назначенным администраторам бота.
-        </p>
-
-        <!-- Тег в описании для админов -->
-        <div class="form-group">
-          <label class="form-label">🏷 Тег статуса в описании профиля</label>
-          <div style="display: flex; gap: 8px;">
-            <select id="admin-tag-select" style="flex: 1;">
-              <option value="off">Выключен (без метки)</option>
-              <option value="admin">#admin</option>
-              <option value="dev">#dev</option>
-              <option value="user">#user</option>
-            </select>
-            <button id="save-tag-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px;">
-              ОК
-            </button>
-          </div>
-          <div class="form-hint">Метка роли в конце вашего био в Telegram.</div>
-        </div>
-      </div>
-
-      <!-- Выдача Premium и функций -->
-      <div class="card">
-        <div class="card-title">
-          <span>💎 Выдача Premium и прав</span>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Пользователь</label>
-          <input type="text" id="grant-user-input" class="input-text" placeholder="@username или ID пользователя">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Функция</label>
-          <select id="grant-feature-select">
-            <option value="premium">💎 Полный Премиум</option>
-            <option value="custom_stage">🎭 Кастомные стадии</option>
-            <option value="hide_stage">🔒 Скрытие стадий</option>
-            <option value="weather">⛅️ Погода в имени</option>
-            <option value="pair_bio">👥 Парные описания</option>
-            <option value="all">🌟 Все функции</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Срок действия (дней)</label>
-          <input type="number" id="grant-days-input" class="input-text" placeholder="30 (оставьте пустым для бессрочного)">
-        </div>
-        <button id="grant-feature-btn" class="btn">
-          ✨ Выдать доступ
+      <!-- Переключатель подвкладок для Владельца: Настройки vs Логирование -->
+      <div id="admin-subtabs-nav" class="subtabs-bar" style="display: none;">
+        <button id="subtab-btn-settings" class="subtab-btn active" onclick="switchAdminSubtab('settings')">
+          👑 Настройки бота
+        </button>
+        <button id="subtab-btn-logs" class="subtab-btn" onclick="switchAdminSubtab('logs')">
+          📡 Логи чатов (Debug)
         </button>
       </div>
 
-      <!-- Управление администраторами -->
-      <div id="admin-management-card" class="card">
-        <div class="card-title">
-          <span>👥 Список администраторов</span>
-        </div>
-        <div id="admins-list-container" style="margin-bottom: 14px;"></div>
-        <div class="form-group">
-          <label class="form-label">Назначить администратора</label>
-          <div style="display: flex; gap: 8px;">
-            <input type="text" id="new-admin-input" class="input-text" placeholder="@username или ID" style="flex: 1;">
-            <button id="add-admin-btn" class="btn" style="width: auto; padding: 0 16px;">
-              ➕
-            </button>
+      <!-- Раздел 1: Настройки администратора -->
+      <div id="admin-settings-section">
+        <div class="card" style="border-color: rgba(234, 179, 8, 0.4);">
+          <div class="card-title">
+            <span>👑 Панель управления</span>
+            <span id="admin-rank-badge" class="status-pill" style="background: rgba(234, 179, 8, 0.2); color: #eab308;">Администратор</span>
           </div>
+          <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
+            Вкладка доступна только владельцу и назначенным администраторам бота.
+          </p>
+
+          <!-- Тег в описании для админов -->
+          <div class="form-group">
+            <label class="form-label">🏷 Тег статуса в описании профиля</label>
+            <div style="display: flex; gap: 8px;">
+              <select id="admin-tag-select" style="flex: 1;">
+                <option value="off">Выключен (без метки)</option>
+                <option value="admin">#admin</option>
+                <option value="dev">#dev</option>
+                <option value="user">#user</option>
+              </select>
+              <button id="save-tag-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px;">
+                ОК
+              </button>
+            </div>
+            <div class="form-hint">Метка роли в конце вашего био в Telegram.</div>
+          </div>
+        </div>
+
+        <!-- Выдача Premium и функций -->
+        <div class="card">
+          <div class="card-title">
+            <span>💎 Выдача Premium и прав</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Пользователь</label>
+            <input type="text" id="grant-user-input" class="input-text" placeholder="@username или ID пользователя">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Функция</label>
+            <select id="grant-feature-select">
+              <option value="premium">💎 Полный Премиум</option>
+              <option value="custom_stage">🎭 Кастомные стадии</option>
+              <option value="hide_stage">🔒 Скрытие стадий</option>
+              <option value="weather">⛅️ Погода в имени</option>
+              <option value="pair_bio">👥 Парные описания</option>
+              <option value="all">🌟 Все функции</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Срок действия (дней)</label>
+            <input type="number" id="grant-days-input" class="input-text" placeholder="30 (оставьте пустым для бессрочного)">
+          </div>
+          <button id="grant-feature-btn" class="btn">
+            ✨ Выдать доступ
+          </button>
+        </div>
+
+        <!-- Управление администраторами -->
+        <div id="admin-management-card" class="card">
+          <div class="card-title">
+            <span>👥 Список администраторов</span>
+          </div>
+          <div id="admins-list-container" style="margin-bottom: 14px;"></div>
+          <div class="form-group">
+            <label class="form-label">Назначить администратора</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="new-admin-input" class="input-text" placeholder="@username или ID" style="flex: 1;">
+              <button id="add-admin-btn" class="btn" style="width: auto; padding: 0 16px;">
+                ➕
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Массовая рассылка -->
+        <div class="card">
+          <div class="card-title">
+            <span>📢 Массовая рассылка</span>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Текст сообщения (поддерживает Markdown)</label>
+            <textarea id="broadcast-text-input" class="input-text" rows="4" placeholder="Введите текст объявления для всех пользователей бота..."></textarea>
+          </div>
+          <button id="send-broadcast-btn" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
+            🚀 Запустить рассылку
+          </button>
         </div>
       </div>
 
-      <!-- Массовая рассылка -->
-      <div class="card">
-        <div class="card-title">
-          <span>📢 Массовая рассылка</span>
+      <!-- Раздел 2: Логирование сообщений для отладки (Debug) -->
+      <div id="admin-logs-section" style="display: none;">
+        <div class="card" style="border-color: rgba(99, 102, 241, 0.4);">
+          <div class="card-title">
+            <span>📡 Логирование чатов (Debug)</span>
+            <span id="logs-total-badge" class="status-pill" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
+              0 сообщений
+            </span>
+          </div>
+          <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
+            В режиме реального времени отображаются все сообщения из подключенных к боту чатов. Если сообщение удалено или изменено — отображается соответствующая пометка и оригинальный текст.
+          </p>
+
+          <!-- Переключатель скрытого перехвата -->
+          <div class="switch-row" style="margin-bottom: 12px; padding: 6px 0;">
+            <div class="switch-info">
+              <div class="switch-title">🛡 Скрытый перехват (autostop)</div>
+              <div class="switch-desc">Автосохранение удаляемых и одноразовых медиа</div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="logs-autostop-toggle" onchange="toggleAutostopFromLogs()">
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <!-- Поиск и инструменты -->
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="text" id="log-search-input" class="input-text" placeholder="🔍 Поиск по тексту, автору, ID..." style="flex: 1;" oninput="onLogSearchInput()">
+            <button id="logs-refresh-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px; font-size: 16px;" onclick="reloadLogs(true)" title="Обновить">
+              🔄
+            </button>
+          </div>
+
+          <!-- Фильтр по чату -->
+          <div class="form-group" style="margin-bottom: 10px;">
+            <select id="log-chat-select" onchange="onLogChatSelectChange()">
+              <option value="">💬 Все подключенные чаты</option>
+            </select>
+          </div>
+
+          <!-- Быстрые фильтры (чипсы) -->
+          <div class="log-filter-chips">
+            <button class="chip-btn active" data-filter="all" onclick="setLogFilter('all')">
+              Все <span id="chip-cnt-all" class="badge-count">0</span>
+            </button>
+            <button class="chip-btn" data-filter="deleted" onclick="setLogFilter('deleted')">
+              🗑 Удалённые <span id="chip-cnt-deleted" class="badge-count">0</span>
+            </button>
+            <button class="chip-btn" data-filter="edited" onclick="setLogFilter('edited')">
+              ✏️ Отредактированные <span id="chip-cnt-edited" class="badge-count">0</span>
+            </button>
+            <button class="chip-btn" data-filter="ephemeral" onclick="setLogFilter('ephemeral')">
+              🔥 Одноразовые <span id="chip-cnt-ephemeral" class="badge-count">0</span>
+            </button>
+            <button class="chip-btn" data-filter="media" onclick="setLogFilter('media')">
+              📁 Медиа <span id="chip-cnt-media" class="badge-count">0</span>
+            </button>
+          </div>
+
+          <!-- Автообновление переключатель -->
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 12px; color: var(--hint-color);">
+            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="checkbox" id="logs-autorefresh-check" onchange="toggleAutoRefreshLogs(this.checked)">
+              <span>Автообновление (каждые 5 сек)</span>
+            </label>
+            <span id="logs-status-text">Загрузка…</span>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Текст сообщения (поддерживает Markdown)</label>
-          <textarea id="broadcast-text-input" class="input-text" rows="4" placeholder="Введите текст объявления для всех пользователей бота..."></textarea>
-        </div>
-        <button id="send-broadcast-btn" class="btn btn-secondary" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
-          🚀 Запустить рассылку
+
+        <!-- Контейнер для карточек сообщений -->
+        <div id="logs-list-container"></div>
+
+        <!-- Кнопка пагинации -->
+        <button id="logs-load-more-btn" class="btn btn-secondary" style="display: none; margin-top: 10px; margin-bottom: 20px;" onclick="loadMoreLogs()">
+          Загрузить ещё сообщения ⬇️
         </button>
       </div>
     </div>
@@ -1253,6 +1623,17 @@
           loadAdminOverview();
         } else {
           adminNav.style.display = "none";
+        }
+
+        // Проверка прав владельца для Debug-логирования
+        const debugPill = document.getElementById("owner-debug-pill");
+        const subtabsNav = document.getElementById("admin-subtabs-nav");
+        if (u.is_owner) {
+          if (debugPill) debugPill.style.display = "inline-flex";
+          if (subtabsNav) subtabsNav.style.display = "flex";
+        } else {
+          if (debugPill) debugPill.style.display = "none";
+          if (subtabsNav) subtabsNav.style.display = "none";
         }
 
       } catch (err) {
@@ -2034,6 +2415,370 @@
         showToast("Ошибка запроса", "❌");
       }
     });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 📡 РАЗДЕЛ ЛОГИРОВАНИЯ СООБЩЕНИЙ ЧАТОВ (DEBUG) ДЛЯ ВЛАДЕЛЬЦА
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let currentLogFilter = 'all';
+    let currentLogSearch = '';
+    let currentLogChatId = '';
+    let logOffset = 0;
+    const logLimit = 30;
+    let logSearchTimer = null;
+    let logAutoRefreshTimer = null;
+    let activeAdminSubtab = 'settings';
+
+    function switchAdminSubtab(target) {
+      activeAdminSubtab = target;
+      const isLogs = target === 'logs';
+      document.getElementById('subtab-btn-settings').classList.toggle('active', !isLogs);
+      document.getElementById('subtab-btn-logs').classList.toggle('active', isLogs);
+      document.getElementById('admin-settings-section').style.display = isLogs ? 'none' : 'block';
+      document.getElementById('admin-logs-section').style.display = isLogs ? 'block' : 'none';
+
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+
+      if (isLogs) {
+        reloadLogs();
+      }
+    }
+
+    function openDebugLogs() {
+      // Переключаемся на вкладку админа
+      document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+
+      const adminNav = document.getElementById('nav-admin');
+      if (adminNav) adminNav.classList.add('active');
+      const adminTab = document.getElementById('tab-admin');
+      if (adminTab) adminTab.classList.add('active');
+
+      switchAdminSubtab('logs');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function setLogFilter(filterType) {
+      currentLogFilter = filterType;
+      document.querySelectorAll('.chip-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-filter') === filterType);
+      });
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+      reloadLogs();
+    }
+
+    function onLogSearchInput() {
+      clearTimeout(logSearchTimer);
+      logSearchTimer = setTimeout(() => {
+        currentLogSearch = document.getElementById('log-search-input').value.trim();
+        reloadLogs();
+      }, 350);
+    }
+
+    function onLogChatSelectChange() {
+      currentLogChatId = document.getElementById('log-chat-select').value;
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+      reloadLogs();
+    }
+
+    function toggleAutoRefreshLogs(enabled) {
+      if (logAutoRefreshTimer) {
+        clearInterval(logAutoRefreshTimer);
+        logAutoRefreshTimer = null;
+      }
+      if (enabled) {
+        logAutoRefreshTimer = setInterval(() => {
+          fetchLogs(false, true); // фоновое обновление
+        }, 5000);
+        showToast("Автообновление логов включено (5 сек)", "⏱");
+      } else {
+        showToast("Автообновление логов выключено", "⏸");
+      }
+    }
+
+    async function toggleAutostopFromLogs() {
+      const initData = tg?.initData || "";
+      try {
+        const res = await fetch("/api/owner/toggle_autostop", {
+          method: "POST",
+          headers: {
+            "Authorization": `tma ${initData}`,
+            "Content-Type": "application/json"
+          }
+        });
+        if (!res.ok) throw new Error();
+        const d = await res.json();
+        document.getElementById("logs-autostop-toggle").checked = Boolean(d.is_active);
+        showToast(d.is_active ? "Скрытый перехват активен ✅" : "Скрытый перехват выключен ❌");
+      } catch (err) {
+        showToast("Ошибка переключения перехвата", "❌");
+      }
+    }
+
+    async function reloadLogs(showIndicator = false) {
+      logOffset = 0;
+      if (showIndicator) {
+        const btn = document.getElementById("logs-refresh-btn");
+        if (btn) btn.style.transform = "rotate(180deg)";
+        setTimeout(() => { if (btn) btn.style.transform = "none"; }, 300);
+      }
+      await fetchLogs(false);
+    }
+
+    async function loadMoreLogs() {
+      logOffset += logLimit;
+      await fetchLogs(true);
+    }
+
+    async function fetchLogs(append = false, isSilent = false) {
+      const container = document.getElementById("logs-list-container");
+      const statusText = document.getElementById("logs-status-text");
+      const loadMoreBtn = document.getElementById("logs-load-more-btn");
+
+      if (!append && !isSilent) {
+        container.innerHTML = '<div style="text-align: center; padding: 30px 0; color: var(--hint-color);"><span style="display:inline-block; animation: spin 1s linear infinite; font-size:24px;">⏳</span><div style="margin-top:8px;">Загрузка сообщений…</div></div>';
+      }
+
+      const initData = tg?.initData || "";
+      const params = new URLSearchParams({
+        filter: currentLogFilter,
+        limit: String(logLimit),
+        offset: String(logOffset),
+      });
+      if (currentLogSearch) params.set("search", currentLogSearch);
+      if (currentLogChatId) params.set("chat_id", currentLogChatId);
+
+      try {
+        const res = await fetch(`/api/owner/messages?${params.toString()}`, {
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        if (!res.ok) {
+          if (res.status === 403) {
+            container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Доступ к логам сообщений разрешен только создателю (владельцу) бота.</div>';
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!data.ok) return;
+
+        // Переключатель автостопа
+        if (data.autostop_active !== undefined) {
+          const autoSw = document.getElementById("logs-autostop-toggle");
+          if (autoSw) autoSw.checked = Boolean(data.autostop_active);
+        }
+
+        // Счетчики на фильтрах
+        const st = data.summary_stats || {};
+        const elAll = document.getElementById("chip-cnt-all");
+        if (elAll) elAll.textContent = st.all || 0;
+        const elDel = document.getElementById("chip-cnt-deleted");
+        if (elDel) elDel.textContent = st.deleted || 0;
+        const elEd = document.getElementById("chip-cnt-edited");
+        if (elEd) elEd.textContent = st.edited || 0;
+        const elEph = document.getElementById("chip-cnt-ephemeral");
+        if (elEph) elEph.textContent = st.ephemeral || 0;
+        const elMed = document.getElementById("chip-cnt-media");
+        if (elMed) elMed.textContent = st.media || 0;
+
+        const totalBadge = document.getElementById("logs-total-badge");
+        if (totalBadge) totalBadge.textContent = `${data.total} сообщений`;
+
+        // Обновляем список чатов в селекте
+        const chatSelect = document.getElementById("log-chat-select");
+        if (chatSelect && chatSelect.options.length <= 1 && data.chats) {
+          data.chats.forEach(ch => {
+            const opt = document.createElement("option");
+            opt.value = ch.chat_id;
+            opt.textContent = `${ch.title} (${ch.count} сообщ.)`;
+            chatSelect.appendChild(opt);
+          });
+        }
+
+        const messages = data.messages || [];
+
+        if (!append) {
+          container.innerHTML = "";
+        }
+
+        if (messages.length === 0 && !append) {
+          container.innerHTML = `
+            <div style="text-align: center; padding: 40px 20px; background: rgba(30, 41, 59, 0.4); border-radius: 14px; border: 1px dashed var(--card-border);">
+              <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">Сообщения не найдены</div>
+              <div style="font-size: 12px; color: var(--hint-color);">Попробуйте изменить поисковый запрос или фильтр.</div>
+            </div>
+          `;
+          loadMoreBtn.style.display = "none";
+          statusText.textContent = `Найдено 0`;
+          return;
+        }
+
+        messages.forEach(msg => {
+          container.appendChild(createLogMessageCard(msg));
+        });
+
+        const currentCount = container.querySelectorAll(".log-card").length;
+        statusText.textContent = `Показано ${currentCount} из ${data.total}`;
+
+        if (currentCount < data.total) {
+          loadMoreBtn.style.display = "block";
+        } else {
+          loadMoreBtn.style.display = "none";
+        }
+      } catch (err) {
+        console.error("Ошибка загрузки логов:", err);
+        if (!append) {
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Ошибка соединения с сервером при получении логов.</div>';
+        }
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function formatLogDate(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const day = String(d.getDate()).padStart(2, "0");
+        const mon = String(d.getMonth() + 1).padStart(2, "0");
+        const hr = String(d.getHours()).padStart(2, "0");
+        const min = String(d.getMinutes()).padStart(2, "0");
+        const sec = String(d.getSeconds()).padStart(2, "0");
+        return `${day}.${mon} в ${hr}:${min}:${sec}`;
+      } catch (e) {
+        return isoStr;
+      }
+    }
+
+    function getMediaLabel(type) {
+      const m = {
+        photo: "📸 Фото",
+        video: "🎥 Видео",
+        voice: "🎤 Голосовое",
+        video_note: "📹 Кружочек",
+        audio: "🎵 Аудио",
+        document: "📄 Документ",
+      };
+      return m[type] || `📁 ${type}`;
+    }
+
+    function createLogMessageCard(msg) {
+      const card = document.createElement("div");
+      let cardClass = "log-card";
+      if (msg.is_deleted) cardClass += " deleted-card";
+      else if (msg.is_edited) cardClass += " edited-card";
+      else if (msg.is_ephemeral) cardClass += " ephemeral-card";
+      card.className = cardClass;
+
+      const initial = (msg.from_user_name || "U")[0].toUpperCase();
+
+      // Пометки (Badges)
+      let badgesHtml = "";
+      if (msg.is_deleted) {
+        const delTime = msg.deleted_at ? ` в ${formatLogDate(msg.deleted_at)}` : "";
+        badgesHtml += `<span class="badge-pill badge-deleted">🗑 УДАЛЕНО${delTime}</span>`;
+      }
+      if (msg.is_edited) {
+        const edTime = msg.edited_at ? ` в ${formatLogDate(msg.edited_at)}` : "";
+        badgesHtml += `<span class="badge-pill badge-edited">✏️ ОТРЕДАКТИРОВАНО${edTime}</span>`;
+      }
+      if (msg.is_ephemeral) {
+        badgesHtml += `<span class="badge-pill badge-ephemeral">🔥 ОДНОРАЗОВОЕ</span>`;
+      }
+      if (msg.media_type) {
+        badgesHtml += `<span class="badge-pill badge-media">${getMediaLabel(msg.media_type)}</span>`;
+      }
+      badgesHtml += `<span class="badge-pill badge-chat-tag">💬 Чат: ${escapeHtml(msg.chat_title)} [${msg.chat_id}]</span>`;
+      if (msg.connection_owner_name) {
+        badgesHtml += `<span class="badge-pill badge-chat-tag">👤 Бизнес: ${escapeHtml(msg.connection_owner_name)}</span>`;
+      }
+
+      // Текст / Содержимое (сравнение версий при редактировании)
+      let contentHtml = "";
+      if (msg.is_edited && msg.original_text && msg.original_text !== msg.text) {
+        contentHtml = `
+          <div class="diff-container">
+            <div class="diff-section">
+              <div class="diff-label old">🔻 Было (до редактирования):</div>
+              <div class="diff-content">${escapeHtml(msg.original_text)}</div>
+            </div>
+            <div class="diff-section">
+              <div class="diff-label new">🔺 Стало (текущее):</div>
+              <div class="diff-content">${escapeHtml(msg.text || "(текст удален)")}</div>
+            </div>
+          </div>
+        `;
+      } else if (msg.text) {
+        contentHtml = `<div class="msg-text-bubble">${escapeHtml(msg.text)}</div>`;
+      } else if (!msg.media_type) {
+        contentHtml = `<div class="msg-text-bubble" style="color: var(--hint-color); font-style: italic;">(пустое сообщение)</div>`;
+      }
+
+      // Вложения (Фото, Видео, Аудио/Голос)
+      let mediaHtml = "";
+      if (msg.media_type) {
+        if (msg.has_media_file && msg.media_type === "photo") {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="log-media-preview">
+              <img src="${mediaUrl}" class="log-media-thumb" loading="lazy" alt="Медиа" onclick="window.open('${mediaUrl}', '_blank')">
+            </div>
+          `;
+        } else if (msg.has_media_file && (msg.media_type === "voice" || msg.media_type === "audio")) {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="log-media-preview">
+              <audio controls src="${mediaUrl}" style="width: 100%; height: 36px; border-radius: 8px;"></audio>
+            </div>
+          `;
+        } else if (msg.has_media_file && msg.media_type === "video") {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="log-media-preview">
+              <video controls src="${mediaUrl}" style="max-width: 100%; max-height: 220px; border-radius: 8px;"></video>
+            </div>
+          `;
+        } else {
+          mediaHtml = `
+            <div style="font-size: 11px; color: var(--hint-color); margin-top: 6px;">
+              📎 Файл сохранен: ${msg.has_media_file ? "✅ на сервере" : "❌ отсутствует"}
+            </div>
+          `;
+        }
+      }
+
+      card.innerHTML = `
+        <div class="log-card-header">
+          <div class="log-sender-box">
+            <div class="log-avatar">${initial}</div>
+            <div class="log-sender-meta">
+              <div class="log-sender-name">${escapeHtml(msg.from_user_name)}</div>
+              <div class="log-sender-sub">${msg.from_username ? '@' + escapeHtml(msg.from_username) : 'ID: ' + msg.from_user_id}</div>
+            </div>
+          </div>
+          <div class="log-timestamp">${formatLogDate(msg.date)}</div>
+        </div>
+
+        <div class="log-badges-row">${badgesHtml}</div>
+        <div class="log-body">${contentHtml}${mediaHtml}</div>
+
+        <div class="log-footer">
+          <span>Msg ID: <code>#${msg.message_id}</code></span>
+          <span>${msg.business_connection_id ? 'Бизнес-аккаунт' : 'Личный чат'}</span>
+        </div>
+      `;
+
+      return card;
+    }
 
     // Дата сегодня
     const d = new Date();

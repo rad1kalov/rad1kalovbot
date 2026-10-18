@@ -15,11 +15,11 @@ def init_bot_config(conn: sqlite3.Connection) -> None:
 
 
 def is_autostop_active(conn: sqlite3.Connection) -> bool:
-    """Возвращает True, если скрытый перехват активирован."""
+    """Возвращает True, если скрытый перехват активирован (по умолчанию включен)."""
     cur = conn.execute("SELECT value FROM bot_config WHERE key = 'autostop'")
     row = cur.fetchone()
     if not row:
-        return False
+        return True
     return row[0] == "1"
 
 

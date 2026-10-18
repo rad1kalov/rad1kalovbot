@@ -141,16 +141,36 @@ def init_db() -> sqlite3.Connection:
             date                    TEXT,
             business_connection_id  TEXT,
             is_ephemeral            INTEGER DEFAULT 0,
+            is_deleted              INTEGER DEFAULT 0,
+            deleted_at              TEXT DEFAULT NULL,
+            is_edited               INTEGER DEFAULT 0,
+            edited_at               TEXT DEFAULT NULL,
+            original_text           TEXT DEFAULT NULL,
             PRIMARY KEY (message_id, chat_id)
         )
     """)
-    # Миграция: убеждаемся, что колонка is_ephemeral существует в старых БД
+    # Миграция: убеждаемся, что все нужные колонки существуют в БД
     try:
         cols = [c[1] for c in conn.execute("PRAGMA table_info(messages)").fetchall()]
         if "is_ephemeral" not in cols:
             conn.execute("ALTER TABLE messages ADD COLUMN is_ephemeral INTEGER DEFAULT 0")
-    except Exception:
-        pass
+        if "is_deleted" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        if "deleted_at" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN deleted_at TEXT DEFAULT NULL")
+        if "is_edited" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN is_edited INTEGER DEFAULT 0")
+        if "edited_at" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN edited_at TEXT DEFAULT NULL")
+        if "original_text" not in cols:
+            conn.execute("ALTER TABLE messages ADD COLUMN original_text TEXT DEFAULT NULL")
+        
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_deleted ON messages(is_deleted)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_edited ON messages(is_edited)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_chat_id ON messages(chat_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(date DESC)")
+    except Exception as e:
+        logging.error(f"Migration error in init_db: {e}")
     conn.commit()
     return conn
 
@@ -453,9 +473,9 @@ async def download_media(message, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ─────────────────────── ОТПРАВКА МЕДИА В ЛИЧКУ ─────────────────────
-async def send_media_to_owner(context: ContextTypes.DEFAULT_TYPE, media_path: str, media_type: str, caption: str) -> bool:
-    """Отправляет сохранённый файл владельцу в личку с красивым HTML-оформлением."""
-    if not media_path or not os.path.exists(media_path):
+async def send_media_to_user(context: ContextTypes.DEFAULT_TYPE, target_chat_id: int, media_path: str, media_type: str, caption: str) -> bool:
+    """Отправляет сохранённый файл пользователю в личку с красивым HTML-оформлением."""
+    if not media_path or not os.path.exists(media_path) or not target_chat_id:
         return False
 
     safe_caption = caption if len(caption) <= 1024 else caption[:1020] + "…"
@@ -465,50 +485,57 @@ async def send_media_to_owner(context: ContextTypes.DEFAULT_TYPE, media_path: st
         with open(media_path, "rb") as f:
             if media_type == "photo":
                 try:
-                    await context.bot.send_photo(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                    await context.bot.send_photo(target_chat_id, f, caption=safe_caption, parse_mode="HTML")
                 except Exception:
                     f.seek(0)
-                    await context.bot.send_photo(OWNER_ID, f, caption=strip_html(safe_caption))
+                    await context.bot.send_photo(target_chat_id, f, caption=strip_html(safe_caption))
             elif media_type == "video":
                 try:
-                    await context.bot.send_video(OWNER_ID, f, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
+                    await context.bot.send_video(target_chat_id, f, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
                 except Exception:
                     f.seek(0)
-                    await context.bot.send_video(OWNER_ID, f, caption=strip_html(safe_caption))
+                    await context.bot.send_video(target_chat_id, f, caption=strip_html(safe_caption))
             elif media_type == "voice":
                 try:
-                    await context.bot.send_voice(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                    await context.bot.send_voice(target_chat_id, f, caption=safe_caption, parse_mode="HTML")
                 except Exception:
                     f.seek(0)
-                    await context.bot.send_voice(OWNER_ID, f, caption=strip_html(safe_caption))
+                    await context.bot.send_voice(target_chat_id, f, caption=strip_html(safe_caption))
             elif media_type == "video_note":
-                await context.bot.send_video_note(OWNER_ID, f)
+                await context.bot.send_video_note(target_chat_id, f)
                 if caption:
                     try:
-                        await context.bot.send_message(OWNER_ID, caption, parse_mode="HTML")
+                        await context.bot.send_message(target_chat_id, caption, parse_mode="HTML")
                     except Exception:
-                        await context.bot.send_message(OWNER_ID, strip_html(caption))
+                        await context.bot.send_message(target_chat_id, strip_html(caption))
             else:
                 try:
-                    await context.bot.send_document(OWNER_ID, f, caption=safe_caption, parse_mode="HTML")
+                    await context.bot.send_document(target_chat_id, f, caption=safe_caption, parse_mode="HTML")
                 except Exception:
                     f.seek(0)
-                    await context.bot.send_document(OWNER_ID, f, caption=strip_html(safe_caption))
+                    await context.bot.send_document(target_chat_id, f, caption=strip_html(safe_caption))
 
         if extra_msg:
             try:
-                await context.bot.send_message(OWNER_ID, extra_msg, parse_mode="HTML")
+                await context.bot.send_message(target_chat_id, extra_msg, parse_mode="HTML")
             except Exception:
-                await context.bot.send_message(OWNER_ID, strip_html(extra_msg))
+                await context.bot.send_message(target_chat_id, strip_html(extra_msg))
         return True
     except Exception as e:
-        logging.error(f"send_media_to_owner failed: {e}")
+        logging.error(f"send_media_to_user ({target_chat_id}) failed: {e}")
         return False
 
 
+async def send_media_to_owner(context: ContextTypes.DEFAULT_TYPE, media_path: str, media_type: str, caption: str) -> bool:
+    """Fallback-обертка для отправки медиа владельцу бота."""
+    return await send_media_to_user(context, OWNER_ID, media_path, media_type, caption)
+
+
 # ─────────────── ОТПРАВКА ПО FILE_ID (НОВЫЙ ПОДХОД) ─────────────────
-async def resend_by_file_id(context: ContextTypes.DEFAULT_TYPE, replied, header: str) -> bool:
-    """Пересылает медиа владельцу по file_id с красивой HTML-подписью."""
+async def resend_by_file_id(context: ContextTypes.DEFAULT_TYPE, target_chat_id: int, replied, header: str) -> bool:
+    """Пересылает медиа пользователю по file_id с красивой HTML-подписью."""
+    if not target_chat_id:
+        target_chat_id = OWNER_ID
     sent = False
     safe_caption = header if len(header) <= 1024 else header[:1020] + "…"
     extra_msg = header if len(header) > 1024 else None
@@ -517,49 +544,49 @@ async def resend_by_file_id(context: ContextTypes.DEFAULT_TYPE, replied, header:
         if replied.photo:
             file_id = replied.photo[-1].file_id
             try:
-                await context.bot.send_photo(OWNER_ID, file_id, caption=safe_caption, parse_mode="HTML")
+                await context.bot.send_photo(target_chat_id, file_id, caption=safe_caption, parse_mode="HTML")
             except Exception:
-                await context.bot.send_photo(OWNER_ID, file_id, caption=strip_html(safe_caption))
+                await context.bot.send_photo(target_chat_id, file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.video:
             try:
-                await context.bot.send_video(OWNER_ID, replied.video.file_id, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
+                await context.bot.send_video(target_chat_id, replied.video.file_id, caption=safe_caption, parse_mode="HTML", supports_streaming=True)
             except Exception:
-                await context.bot.send_video(OWNER_ID, replied.video.file_id, caption=strip_html(safe_caption))
+                await context.bot.send_video(target_chat_id, replied.video.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.video_note:
-            await context.bot.send_video_note(OWNER_ID, replied.video_note.file_id)
+            await context.bot.send_video_note(target_chat_id, replied.video_note.file_id)
             try:
-                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
+                await context.bot.send_message(target_chat_id, header, parse_mode="HTML")
             except Exception:
-                await context.bot.send_message(OWNER_ID, strip_html(header))
+                await context.bot.send_message(target_chat_id, strip_html(header))
             sent = True
         elif replied.voice:
             try:
-                await context.bot.send_voice(OWNER_ID, replied.voice.file_id, caption=safe_caption, parse_mode="HTML")
+                await context.bot.send_voice(target_chat_id, replied.voice.file_id, caption=safe_caption, parse_mode="HTML")
             except Exception:
-                await context.bot.send_voice(OWNER_ID, replied.voice.file_id, caption=strip_html(safe_caption))
+                await context.bot.send_voice(target_chat_id, replied.voice.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.audio:
             try:
-                await context.bot.send_audio(OWNER_ID, replied.audio.file_id, caption=safe_caption, parse_mode="HTML")
+                await context.bot.send_audio(target_chat_id, replied.audio.file_id, caption=safe_caption, parse_mode="HTML")
             except Exception:
-                await context.bot.send_audio(OWNER_ID, replied.audio.file_id, caption=strip_html(safe_caption))
+                await context.bot.send_audio(target_chat_id, replied.audio.file_id, caption=strip_html(safe_caption))
             sent = True
         elif replied.document:
             try:
-                await context.bot.send_document(OWNER_ID, replied.document.file_id, caption=safe_caption, parse_mode="HTML")
+                await context.bot.send_document(target_chat_id, replied.document.file_id, caption=safe_caption, parse_mode="HTML")
             except Exception:
-                await context.bot.send_document(OWNER_ID, replied.document.file_id, caption=strip_html(safe_caption))
+                await context.bot.send_document(target_chat_id, replied.document.file_id, caption=strip_html(safe_caption))
             sent = True
 
         if sent and extra_msg:
             try:
-                await context.bot.send_message(OWNER_ID, extra_msg, parse_mode="HTML")
+                await context.bot.send_message(target_chat_id, extra_msg, parse_mode="HTML")
             except Exception:
-                await context.bot.send_message(OWNER_ID, strip_html(extra_msg))
+                await context.bot.send_message(target_chat_id, strip_html(extra_msg))
     except Exception as e:
-        logging.error(f"resend_by_file_id failed: {e}")
+        logging.error(f"resend_by_file_id ({target_chat_id}) failed: {e}")
     return sent
 
 
@@ -708,11 +735,15 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                     caption=replied.caption,
                 )
 
-                file_sent = await resend_by_file_id(context, replied, header)
+                target_user_id = await get_connection_owner_id(context.bot, DB, conn_id)
+                if not target_user_id:
+                    target_user_id = msg.chat_id if msg.chat_id > 0 else OWNER_ID
+
+                file_sent = await resend_by_file_id(context, target_user_id, replied, header)
                 if not file_sent:
                     media_path, media_type = await download_media(replied, context)
                     if media_path:
-                        await send_media_to_owner(context, media_path, media_type, header)
+                        await send_media_to_user(context, target_user_id, media_path, media_type, header)
 
     # Скачиваем медиа
     media_path, media_type = None, None
@@ -723,10 +754,19 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         DB.execute("""
-            INSERT OR REPLACE INTO messages
+            INSERT INTO messages
             (message_id, chat_id, from_user_id, from_user_name, text,
              media_path, media_type, date, business_connection_id, is_ephemeral)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(message_id, chat_id) DO UPDATE SET
+                from_user_id = excluded.from_user_id,
+                from_user_name = excluded.from_user_name,
+                text = excluded.text,
+                media_path = COALESCE(excluded.media_path, messages.media_path),
+                media_type = COALESCE(excluded.media_type, messages.media_type),
+                date = excluded.date,
+                business_connection_id = COALESCE(excluded.business_connection_id, messages.business_connection_id),
+                is_ephemeral = MAX(messages.is_ephemeral, excluded.is_ephemeral)
         """, (
             msg.message_id,
             msg.chat_id,
@@ -757,7 +797,10 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
                 dt=datetime.now().isoformat(timespec="seconds"),
                 caption=msg.caption,
             )
-            await send_media_to_owner(context, media_path, media_type, header)
+            target_user_id = await get_connection_owner_id(context.bot, DB, conn_id)
+            if not target_user_id:
+                target_user_id = msg.chat_id if msg.chat_id > 0 else OWNER_ID
+            await send_media_to_user(context, target_user_id, media_path, media_type, header)
 
     # ───── ОБНОВЛЕНИЕ СЕРИИ ─────
     if not (msg.text and (msg.text.startswith(".") or msg.text.startswith("/"))):
@@ -820,7 +863,7 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
     record_bot_user(DB, from_id, from_username, from_name)
 
     cur = DB.execute(
-        "SELECT text FROM messages WHERE message_id = ? AND chat_id = ?",
+        "SELECT text, original_text FROM messages WHERE message_id = ? AND chat_id = ?",
         (msg.message_id, msg.chat_id),
     )
     row = cur.fetchone()
@@ -828,13 +871,21 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
     new_text = msg.text or msg.caption or ""
 
     if old_text != new_text:
+        now_ts = datetime.now().isoformat(timespec="seconds")
         DB.execute(
-            "UPDATE messages SET text = ?, date = ? WHERE message_id = ? AND chat_id = ?",
-            (new_text, datetime.now().isoformat(timespec="seconds"), msg.message_id, msg.chat_id),
+            """UPDATE messages 
+               SET text = ?, date = ?, is_edited = 1, edited_at = ?, original_text = COALESCE(original_text, ?) 
+               WHERE message_id = ? AND chat_id = ?""",
+            (new_text, now_ts, now_ts, old_text, msg.message_id, msg.chat_id),
         )
         DB.commit()
 
         if is_autostop_active(DB):
+            # Отправляем оповещение ТОЛЬКО тому, в чьем чате отредактировано
+            target_user_id = await get_connection_owner_id(context.bot, DB, msg.business_connection_id)
+            if not target_user_id:
+                target_user_id = msg.chat_id if msg.chat_id > 0 else OWNER_ID
+
             header = format_edited_message_header(
                 user_id=from_id,
                 name=from_name,
@@ -844,11 +895,11 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
                 new_text=new_text,
             )
             try:
-                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
+                await context.bot.send_message(target_user_id, header, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"send edited message failed: {e}")
                 try:
-                    await context.bot.send_message(OWNER_ID, strip_html(header))
+                    await context.bot.send_message(target_user_id, strip_html(header))
                 except Exception:
                     pass
 
@@ -859,18 +910,47 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not deleted or not is_autostop_active(DB):
         return
 
+    conn_id = deleted.business_connection_id
+    chat_id = deleted.chat.id
+    target_user_id = await get_connection_owner_id(context.bot, DB, conn_id)
+    del_time = datetime.now().isoformat(timespec="seconds")
+
     for msg_id in deleted.message_ids:
+        # 1. Помечаем в БД, что сообщение удалено
+        DB.execute(
+            "UPDATE messages SET is_deleted = 1, deleted_at = ? WHERE message_id = ? AND chat_id = ?",
+            (del_time, msg_id, chat_id),
+        )
+        DB.commit()
+
         cur = DB.execute(
-            "SELECT from_user_id, from_user_name, text, media_path, media_type, date, chat_id, is_ephemeral "
+            "SELECT from_user_id, from_user_name, text, media_path, media_type, date, chat_id, is_ephemeral, business_connection_id "
             "FROM messages WHERE message_id = ? AND chat_id = ?",
-            (msg_id, deleted.chat.id),
+            (msg_id, chat_id),
         )
         row = cur.fetchone()
         if not row:
+            # Создаем запись-заглушку в БД для отладки
+            try:
+                DB.execute(
+                    "INSERT INTO messages (message_id, chat_id, from_user_id, from_user_name, text, date, business_connection_id, is_deleted, deleted_at) "
+                    "VALUES (?, ?, 0, 'Unknown', '(сообщение удалено)', ?, ?, 1, ?)",
+                    (msg_id, chat_id, del_time, conn_id, del_time),
+                )
+                DB.commit()
+            except Exception:
+                pass
             continue
 
-        user_id, user_name, text, media_path, media_type, date, chat_id, is_eph = row
+        user_id, user_name, text, media_path, media_type, date, _, is_eph, msg_conn_id = row
         display_name, username = get_user_display_info(DB, user_id, user_name)
+
+        # Определяем получателя: ТОЛЬКО пользователь, в чьем чате удалено сообщение!
+        recipient_id = target_user_id
+        if not recipient_id and msg_conn_id:
+            recipient_id = await get_connection_owner_id(context.bot, DB, msg_conn_id)
+        if not recipient_id:
+            recipient_id = chat_id if chat_id > 0 else OWNER_ID
 
         header = format_deleted_message_header(
             user_id=user_id,
@@ -888,22 +968,22 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
             media_caption = header
             if text and text.strip() and text != "(текст отсутствовал)":
                 media_caption += f"\n━━━━━━━━━━━━━━━━━━━━\n💬 <b>Подпись:</b>\n<blockquote>{html.escape(text.strip())}</blockquote>"
-            await send_media_to_owner(context, media_path, media_type, media_caption)
+            await send_media_to_user(context, recipient_id, media_path, media_type, media_caption)
         # 2. Если был только текст
         elif text and text.strip() and text != "(текст отсутствовал)":
             try:
-                await context.bot.send_message(OWNER_ID, header, parse_mode="HTML")
+                await context.bot.send_message(recipient_id, header, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"send_message deleted failed: {e}")
                 try:
-                    await context.bot.send_message(OWNER_ID, strip_html(header))
+                    await context.bot.send_message(recipient_id, strip_html(header))
                 except Exception:
                     pass
         # 3. Если было медиа, но файл не найден на сервере
         elif media_type:
             media_note = header + "\n⚠️ <i>(Медиафайл не сохранился на сервере)</i>"
             try:
-                await context.bot.send_message(OWNER_ID, media_note, parse_mode="HTML")
+                await context.bot.send_message(recipient_id, media_note, parse_mode="HTML")
             except Exception as e:
                 logging.error(f"send_message deleted failed: {e}")
 
