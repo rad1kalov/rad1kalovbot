@@ -7,7 +7,7 @@
 import html
 import logging
 import sqlite3
-from typing import Optional
+from typing import Optional, Tuple
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
