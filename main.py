@@ -72,6 +72,8 @@ from emoji_status_commands import (
     handle_emoji_status_text_input,
 )
 from emoji_status_worker import emoji_status_worker
+from games_db import init_games_db
+from games_commands import handle_game_command, handle_game_callback
 
 load_dotenv()
 
@@ -184,6 +186,7 @@ init_admin_db(DB)
 init_media_db(DB)
 init_ai_db(DB)
 init_emoji_status_db(DB)
+init_games_db(DB)
 
 # Множество (chat_id, message_id) уже пересланных владельцу одноразовых медиа,
 # чтобы не дублировать отправку при повторных ответах в чате.
@@ -608,7 +611,13 @@ async def on_business_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if msg.text and (msg.text.startswith(".") or msg.text.startswith("/")):
         clean = msg.text.strip().lower()
 
-        # Все команды в бизнес-чате (.ai, .time, .description и др.)
+        # Игры в бизнес-чатах (.game, .games, .rps, .ttt, .dice, .roulette, .coin и др.)
+        # Рассчитаны на двоих игроков (владелец и собеседник).
+        # Собеседнику НЕ нужно подключать бота — он играет кнопками прямо в чате!
+        if await handle_game_command(update, context, DB):
+            return
+
+        # Все остальные команды в бизнес-чате (.ai, .time, .description и др.)
         # разрешено вызывать ТОЛЬКО от своих сообщений (владельца бизнес-аккаунта)!
         # Если пишет собеседник, бот НЕ должен реагировать и тратить токены.
         is_own = await is_own_business_message(context.bot, DB, msg)
@@ -1057,9 +1066,11 @@ def main():
     app.add_handler(CommandHandler("give_feature", lambda u, c: give_feature_command(u, c, DB)))
     app.add_handler(CommandHandler("broadcast", lambda u, c: broadcast_command(u, c, DB)))
     app.add_handler(CommandHandler("ai", lambda u, c: handle_ai_command(u, c, DB)))
+    app.add_handler(CommandHandler(["game", "games", "rps", "ttt", "xo", "dice", "roulette", "coin"], lambda u, c: handle_game_command(u, c, DB)))
 
     # Команды через точку в личных сообщениях с ботом (исключая бизнес-сообщения)
     dm_filter = filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE
+    app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(game|games|rps|ttt|xo|dice|roulette|coin|игры|игра|кнб|кости|рулетка|монетка)\b"), lambda u, c: handle_game_command(u, c, DB)))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.(app|webapp)\b"), webapp_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.help\b"), help_command))
     app.add_handler(MessageHandler(dm_filter & filters.Regex(r"^\.streak\b"), lambda u, c: handle_series_command(u, c, DB)))
@@ -1106,6 +1117,7 @@ def main():
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_emoji_status_callback(u, c, DB), pattern=r"^emj:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_admin_callback(u, c, DB), pattern=r"^adm:"))
     app.add_handler(CallbackQueryHandler(lambda u, c: handle_media_callback(u, c, DB), pattern=r"^mdl:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: handle_game_callback(u, c, DB), pattern=r"^gm:"))
 
     # Бизнес-сообщения
     app.add_handler(MessageHandler(filters.UpdateType.BUSINESS_MESSAGE, on_business_message))

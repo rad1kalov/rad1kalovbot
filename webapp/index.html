@@ -582,7 +582,7 @@
       font-size: 14px;
     }
 
-    /* Logs & Debug Section */
+    /* Logs & Debug Section: Dialogues & Chat UI */
     .subtabs-bar {
       display: flex;
       gap: 8px;
@@ -656,204 +656,399 @@
       background: rgba(255, 255, 255, 0.2);
     }
 
-    .log-card {
-      background: rgba(30, 41, 59, 0.7);
+    /* ─── Dialogue List UI ─── */
+    .dialog-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(30, 41, 59, 0.6);
       border: 1px solid var(--card-border);
       border-radius: 14px;
-      padding: 14px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       position: relative;
-      transition: transform 0.15s, border-color 0.2s;
     }
-    .log-card:active {
-      transform: scale(0.99);
+    .dialog-item:hover {
+      background: rgba(59, 130, 246, 0.1);
+      border-color: rgba(59, 130, 246, 0.3);
+      transform: translateY(-1px);
     }
-    .log-card.deleted-card {
+    .dialog-item:active {
+      transform: scale(0.985);
+    }
+    .dialog-item.has-deleted {
       border-left: 4px solid #ef4444;
-      background: linear-gradient(90deg, rgba(239, 68, 68, 0.08), rgba(30, 41, 59, 0.7) 40%);
-    }
-    .log-card.edited-card {
-      border-left: 4px solid #f59e0b;
-      background: linear-gradient(90deg, rgba(245, 158, 11, 0.08), rgba(30, 41, 59, 0.7) 40%);
-    }
-    .log-card.ephemeral-card {
-      border-left: 4px solid #f97316;
-      background: linear-gradient(90deg, rgba(249, 115, 22, 0.08), rgba(30, 41, 59, 0.7) 40%);
     }
 
-    .log-card-header {
+    .dialog-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--button-color), var(--accent));
+      color: #fff;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 8px;
+      justify-content: center;
+      font-size: 19px;
+      font-weight: 700;
+      flex-shrink: 0;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
     }
 
-    .log-sender-box {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    .dialog-content {
       flex: 1;
       min-width: 0;
     }
 
-    .log-avatar {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #475569, #334155);
+    .dialog-header-row {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 13px;
-      color: #fff;
-      flex-shrink: 0;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 3px;
     }
 
-    .log-sender-meta {
+    .dialog-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-color);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .log-sender-name {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text-color);
-    }
-
-    .log-sender-sub {
-      font-size: 11px;
-      color: var(--hint-color);
-    }
-
-    .log-timestamp {
+    .dialog-time {
       font-size: 11px;
       color: var(--hint-color);
       flex-shrink: 0;
-      white-space: nowrap;
+      margin-left: 8px;
     }
 
-    .log-badges-row {
+    .dialog-sub-row {
+      font-size: 11px;
+      color: #818cf8;
       display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 10px;
-    }
-
-    .badge-pill {
-      font-size: 10px;
-      font-weight: 700;
-      padding: 3px 8px;
-      border-radius: 12px;
-      display: inline-flex;
       align-items: center;
       gap: 4px;
-      letter-spacing: 0.3px;
+      margin-bottom: 4px;
     }
 
-    .badge-deleted {
-      background: rgba(239, 68, 68, 0.2);
+    .dialog-body-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .dialog-snippet {
+      font-size: 12px;
+      color: var(--hint-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .dialog-badges-group {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .dialog-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .dialog-badge.del {
+      background: rgba(239, 68, 68, 0.25);
       color: #f87171;
       border: 1px solid rgba(239, 68, 68, 0.4);
     }
-
-    .badge-edited {
-      background: rgba(245, 158, 11, 0.2);
+    .dialog-badge.ed {
+      background: rgba(245, 158, 11, 0.25);
       color: #fbbf24;
       border: 1px solid rgba(245, 158, 11, 0.4);
     }
-
-    .badge-ephemeral {
-      background: rgba(249, 115, 22, 0.2);
-      color: #fb923c;
-      border: 1px solid rgba(249, 115, 22, 0.4);
-    }
-
-    .badge-media {
-      background: rgba(59, 130, 246, 0.2);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.3);
-    }
-
-    .badge-chat-tag {
-      background: rgba(255, 255, 255, 0.05);
+    .dialog-badge.cnt {
+      background: rgba(255, 255, 255, 0.1);
       color: #cbd5e1;
+    }
+
+    /* ─── Telegram Chat Dialogue UI ─── */
+    .telegram-chat-card {
+      background: #0f172a;
       border: 1px solid var(--card-border);
-    }
-
-    .log-body {
-      margin-bottom: 8px;
-    }
-
-    .msg-text-bubble {
-      font-size: 13px;
-      line-height: 1.45;
-      color: var(--text-color);
-      background: rgba(15, 23, 42, 0.5);
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      border-radius: 10px;
-      padding: 10px 12px;
-      word-break: break-word;
-      white-space: pre-wrap;
-    }
-
-    .diff-container {
-      background: rgba(15, 23, 42, 0.5);
-      border-radius: 10px;
-      border: 1px solid var(--card-border);
-      padding: 10px;
-      font-size: 12px;
-    }
-
-    .diff-section {
-      margin-bottom: 6px;
-    }
-    .diff-section:last-child { margin-bottom: 0; }
-
-    .diff-label {
-      font-weight: 700;
-      font-size: 11px;
+      border-radius: 18px;
+      overflow: hidden;
       display: flex;
-      align-items: center;
-      gap: 4px;
-      margin-bottom: 2px;
-    }
-    .diff-label.old { color: #f87171; }
-    .diff-label.new { color: #34d399; }
-
-    .diff-content {
-      background: rgba(0, 0, 0, 0.25);
-      padding: 6px 8px;
-      border-radius: 6px;
-      word-break: break-word;
-      white-space: pre-wrap;
+      flex-direction: column;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+      min-height: 520px;
+      position: relative;
     }
 
-    .log-media-preview {
-      margin-top: 8px;
-    }
-
-    .log-media-thumb {
-      max-width: 100%;
-      max-height: 220px;
-      border-radius: 8px;
-      object-fit: cover;
-      cursor: pointer;
-      border: 1px solid var(--card-border);
-      display: block;
-    }
-
-    .log-footer {
-      font-size: 11px;
-      color: var(--hint-color);
+    .chat-top-bar {
+      background: rgba(30, 41, 59, 0.95);
+      backdrop-filter: blur(12px);
+      padding: 12px 14px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-top: 1px solid rgba(255, 255, 255, 0.04);
-      padding-top: 8px;
-      margin-top: 8px;
+      gap: 10px;
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .chat-top-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .chat-back-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: none;
+      color: var(--text-color);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .chat-back-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .chat-top-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--button-color), var(--accent));
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .chat-top-title-box {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-top-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-color);
+    }
+
+    .chat-top-subtitle {
+      font-size: 11px;
+      color: var(--hint-color);
+    }
+
+    .chat-stream {
+      padding: 16px 12px 24px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 400px;
+      max-height: 62vh;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+      background:
+        radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.95) 100%);
+    }
+
+    .chat-date-pill {
+      align-self: center;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px);
+      color: #cbd5e1;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 14px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      margin: 8px 0;
+    }
+
+    .bubble-row {
+      display: flex;
+      width: 100%;
+      margin-bottom: 2px;
+    }
+    .bubble-row.incoming {
+      justify-content: flex-start;
+    }
+    .bubble-row.outgoing {
+      justify-content: flex-end;
+    }
+
+    .bubble {
+      max-width: 82%;
+      padding: 9px 12px;
+      position: relative;
+      word-break: break-word;
+      font-size: 13.5px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      transition: all 0.2s ease;
+    }
+
+    .bubble-row.incoming .bubble {
+      background: #1e293b;
+      border-radius: 16px 16px 16px 4px;
+      color: #f8fafc;
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .bubble-row.outgoing .bubble {
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border-radius: 16px 16px 4px 16px;
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .bubble.deleted-bubble {
+      border-left: 3px solid #ef4444 !important;
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), #1e293b) !important;
+    }
+
+    .bubble.edited-bubble {
+      border-left: 3px solid #f59e0b !important;
+    }
+
+    .bubble-sender {
+      font-size: 11.5px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .bubble-row.incoming .bubble-sender {
+      color: #38bdf8;
+    }
+    .bubble-row.outgoing .bubble-sender {
+      color: #bfdbfe;
+    }
+
+    .bubble-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 8px;
+      margin-bottom: 5px;
+      letter-spacing: 0.2px;
+    }
+    .bubble-badge.badge-del {
+      background: rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.5);
+    }
+    .bubble-badge.badge-ed {
+      background: rgba(245, 158, 11, 0.3);
+      color: #fde047;
+      border: 1px solid rgba(245, 158, 11, 0.5);
+      cursor: pointer;
+    }
+    .bubble-badge.badge-eph {
+      background: rgba(249, 115, 22, 0.3);
+      color: #fdba74;
+      border: 1px solid rgba(249, 115, 22, 0.5);
+    }
+
+    .bubble-text {
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .bubble-diff-box {
+      margin-top: 6px;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: 8px;
+      font-size: 11.5px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .bubble-diff-old {
+      color: #fca5a5;
+      margin-bottom: 4px;
+    }
+    .bubble-diff-new {
+      color: #86efac;
+    }
+
+    .bubble-media-preview {
+      margin-top: 6px;
+    }
+    .bubble-media-img {
+      max-width: 100%;
+      max-height: 240px;
+      border-radius: 10px;
+      display: block;
+      cursor: pointer;
+      border: 1px solid var(--card-border);
+    }
+
+    .bubble-meta {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.6);
+      text-align: right;
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+    .bubble-row.outgoing .bubble-meta {
+      color: rgba(255, 255, 255, 0.8);
+    }
+
+    .scroll-bottom-btn {
+      position: absolute;
+      right: 16px;
+      bottom: 20px;
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid var(--card-border);
+      color: var(--text-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      z-index: 10;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+    .scroll-bottom-btn:hover {
+      background: var(--button-color);
+      transform: scale(1.05);
     }
   </style>
 </head>
@@ -1337,80 +1532,113 @@
 
       <!-- Раздел 2: Логирование сообщений для отладки (Debug) -->
       <div id="admin-logs-section" style="display: none;">
-        <div class="card" style="border-color: rgba(99, 102, 241, 0.4);">
-          <div class="card-title">
-            <span>📡 Логирование чатов (Debug)</span>
-            <span id="logs-total-badge" class="status-pill" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
-              0 сообщений
-            </span>
-          </div>
-          <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
-            В режиме реального времени отображаются все сообщения из подключенных к боту чатов. Если сообщение удалено или изменено — отображается соответствующая пометка и оригинальный текст.
-          </p>
 
-          <!-- Переключатель скрытого перехвата -->
-          <div class="switch-row" style="margin-bottom: 12px; padding: 6px 0;">
-            <div class="switch-info">
-              <div class="switch-title">🛡 Скрытый перехват (autostop)</div>
-              <div class="switch-desc">Автосохранение удаляемых и одноразовых медиа</div>
+        <!-- ─── Экран 1: Список диалогов (чатов) ─── -->
+        <div id="dialogs-list-view">
+          <div class="card" style="border-color: rgba(99, 102, 241, 0.4); margin-bottom: 12px;">
+            <div class="card-title">
+              <span>💬 Диалоги и чаты (Debug)</span>
+              <span id="logs-total-badge" class="status-pill" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">
+                0 сообщений
+              </span>
             </div>
-            <label class="switch">
-              <input type="checkbox" id="logs-autostop-toggle" onchange="toggleAutostopFromLogs()">
-              <span class="slider"></span>
-            </label>
+            <p style="font-size: 13px; color: var(--hint-color); margin-bottom: 12px;">
+              Выберите диалог, чтобы открыть чат с сообщениями, удалёнными текстами и сохраненными медиа.
+            </p>
+
+            <!-- Переключатель скрытого перехвата -->
+            <div class="switch-row" style="margin-bottom: 12px; padding: 6px 0;">
+              <div class="switch-info">
+                <div class="switch-title">🛡 Скрытый перехват (autostop)</div>
+                <div class="switch-desc">Автосохранение удаляемых и одноразовых медиа</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="logs-autostop-toggle" onchange="toggleAutostopFromLogs()">
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <!-- Поиск по диалогам -->
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+              <input type="text" id="dialogs-search-input" class="input-text" placeholder="🔍 Поиск диалога или пользователя..." style="flex: 1;" oninput="onDialogSearchInput()">
+              <button id="dialogs-refresh-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px; font-size: 16px;" onclick="reloadDialogs(true)" title="Обновить список">
+                🔄
+              </button>
+            </div>
+
+            <!-- Быстрые фильтры диалогов (чипсы) -->
+            <div class="log-filter-chips">
+              <button class="chip-btn active" data-filter="all" onclick="setDialogFilter('all')">
+                Все <span id="chip-cnt-all" class="badge-count">0</span>
+              </button>
+              <button class="chip-btn" data-filter="deleted" onclick="setDialogFilter('deleted')">
+                🗑 Удалённые <span id="chip-cnt-deleted" class="badge-count">0</span>
+              </button>
+              <button class="chip-btn" data-filter="edited" onclick="setDialogFilter('edited')">
+                ✏️ Изменённые <span id="chip-cnt-edited" class="badge-count">0</span>
+              </button>
+              <button class="chip-btn" data-filter="ephemeral" onclick="setDialogFilter('ephemeral')">
+                🔥 Одноразки <span id="chip-cnt-ephemeral" class="badge-count">0</span>
+              </button>
+              <button class="chip-btn" data-filter="media" onclick="setDialogFilter('media')">
+                📁 С медиа <span id="chip-cnt-media" class="badge-count">0</span>
+              </button>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 12px; color: var(--hint-color);">
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="logs-autorefresh-check" onchange="toggleAutoRefreshLogs(this.checked)">
+                <span>Автообновление (каждые 5 сек)</span>
+              </label>
+              <span id="dialogs-status-text">Загрузка…</span>
+            </div>
           </div>
 
-          <!-- Поиск и инструменты -->
-          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-            <input type="text" id="log-search-input" class="input-text" placeholder="🔍 Поиск по тексту, автору, ID..." style="flex: 1;" oninput="onLogSearchInput()">
-            <button id="logs-refresh-btn" class="btn btn-secondary" style="width: auto; padding: 0 16px; font-size: 16px;" onclick="reloadLogs(true)" title="Обновить">
-              🔄
-            </button>
-          </div>
+          <!-- Список диалогов -->
+          <div id="dialogs-list-container"></div>
+        </div>
 
-          <!-- Фильтр по чату -->
-          <div class="form-group" style="margin-bottom: 10px;">
-            <select id="log-chat-select" onchange="onLogChatSelectChange()">
-              <option value="">💬 Все подключенные чаты</option>
-            </select>
-          </div>
+        <!-- ─── Экран 2: Активный диалог / Чат (Telegram style) ─── -->
+        <div id="active-chat-view" style="display: none;">
+          <div class="telegram-chat-card">
+            <!-- Верхняя панель чата -->
+            <div class="chat-top-bar">
+              <div class="chat-top-left">
+                <button class="chat-back-btn" onclick="closeChatDialogue()" title="Назад ко всем чатам">
+                  ←
+                </button>
+                <div id="active-chat-avatar" class="chat-top-avatar">?</div>
+                <div class="chat-top-title-box">
+                  <div id="active-chat-title" class="chat-top-title">Диалог</div>
+                  <div id="active-chat-subtitle" class="chat-top-subtitle">Загрузка…</div>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <select id="chat-filter-select" onchange="onChatFilterChange()" style="font-size: 11px; padding: 5px 8px; background: rgba(30, 41, 59, 0.9); color: var(--text-color); border: 1px solid var(--card-border); border-radius: 8px;">
+                  <option value="all">Все</option>
+                  <option value="deleted">🗑 Удалённые</option>
+                  <option value="edited">✏️ Изменённые</option>
+                  <option value="ephemeral">🔥 Одноразки</option>
+                  <option value="media">📁 Медиа</option>
+                </select>
+                <button class="btn btn-secondary" style="width: auto; padding: 4px 10px; font-size: 14px; border-radius: 8px;" onclick="refreshActiveChat()" title="Обновить сообщения">
+                  🔄
+                </button>
+              </div>
+            </div>
 
-          <!-- Быстрые фильтры (чипсы) -->
-          <div class="log-filter-chips">
-            <button class="chip-btn active" data-filter="all" onclick="setLogFilter('all')">
-              Все <span id="chip-cnt-all" class="badge-count">0</span>
-            </button>
-            <button class="chip-btn" data-filter="deleted" onclick="setLogFilter('deleted')">
-              🗑 Удалённые <span id="chip-cnt-deleted" class="badge-count">0</span>
-            </button>
-            <button class="chip-btn" data-filter="edited" onclick="setLogFilter('edited')">
-              ✏️ Отредактированные <span id="chip-cnt-edited" class="badge-count">0</span>
-            </button>
-            <button class="chip-btn" data-filter="ephemeral" onclick="setLogFilter('ephemeral')">
-              🔥 Одноразовые <span id="chip-cnt-ephemeral" class="badge-count">0</span>
-            </button>
-            <button class="chip-btn" data-filter="media" onclick="setLogFilter('media')">
-              📁 Медиа <span id="chip-cnt-media" class="badge-count">0</span>
-            </button>
-          </div>
+            <!-- Лента сообщений чата (сообщения от старых к новым) -->
+            <div id="chat-messages-stream" class="chat-stream">
+              <!-- Сообщения будут отрендерены здесь -->
+            </div>
 
-          <!-- Автообновление переключатель -->
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; font-size: 12px; color: var(--hint-color);">
-            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-              <input type="checkbox" id="logs-autorefresh-check" onchange="toggleAutoRefreshLogs(this.checked)">
-              <span>Автообновление (каждые 5 сек)</span>
-            </label>
-            <span id="logs-status-text">Загрузка…</span>
+            <!-- Кнопка скролла вниз (если прокрутили вверх) -->
+            <button id="chat-scroll-bottom-btn" class="scroll-bottom-btn" style="display: none;" onclick="scrollChatToBottom()" title="Вниз">
+              ↓
+            </button>
           </div>
         </div>
 
-        <!-- Контейнер для карточек сообщений -->
-        <div id="logs-list-container"></div>
-
-        <!-- Кнопка пагинации -->
-        <button id="logs-load-more-btn" class="btn btn-secondary" style="display: none; margin-top: 10px; margin-bottom: 20px;" onclick="loadMoreLogs()">
-          Загрузить ещё сообщения ⬇️
-        </button>
       </div>
     </div>
 
@@ -2420,14 +2648,23 @@
     // 📡 РАЗДЕЛ ЛОГИРОВАНИЯ СООБЩЕНИЙ ЧАТОВ (DEBUG) ДЛЯ ВЛАДЕЛЬЦА
     // ═══════════════════════════════════════════════════════════════════════
 
-    let currentLogFilter = 'all';
-    let currentLogSearch = '';
-    let currentLogChatId = '';
-    let logOffset = 0;
-    const logLimit = 30;
-    let logSearchTimer = null;
-    let logAutoRefreshTimer = null;
+    // ═══════════════════════════════════════════════════════════════════════
+    // 📡 ДИАЛОГИ И ЛОГИРОВАНИЕ СООБЩЕНИЙ ЧАТОВ (DEBUG) ДЛЯ ВЛАДЕЛЬЦА
+    // ═══════════════════════════════════════════════════════════════════════
+
+    let currentDialogFilter = 'all';
+    let currentDialogSearch = '';
+    let cachedDialogsList = [];
+    let dialogSearchTimer = null;
+    let logsAutoRefreshTimer = null;
     let activeAdminSubtab = 'settings';
+
+    // Состояние открытого чата
+    let activeChatId = null;
+    let activeChatTitle = '';
+    let activeChatOwnerName = '';
+    let activeChatOwnerId = null;
+    let activeChatFilter = 'all';
 
     function switchAdminSubtab(target) {
       activeAdminSubtab = target;
@@ -2440,12 +2677,19 @@
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
 
       if (isLogs) {
-        reloadLogs();
+        if (activeChatId) {
+          document.getElementById('dialogs-list-view').style.display = 'none';
+          document.getElementById('active-chat-view').style.display = 'block';
+          fetchChatMessages(activeChatId, activeChatFilter, false);
+        } else {
+          document.getElementById('dialogs-list-view').style.display = 'block';
+          document.getElementById('active-chat-view').style.display = 'none';
+          reloadDialogs();
+        }
       }
     }
 
     function openDebugLogs() {
-      // Переключаемся на вкладку админа
       document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
       document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
 
@@ -2458,41 +2702,39 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    function setLogFilter(filterType) {
-      currentLogFilter = filterType;
-      document.querySelectorAll('.chip-btn').forEach(btn => {
+    function setDialogFilter(filterType) {
+      currentDialogFilter = filterType;
+      document.querySelectorAll('#dialogs-list-view .chip-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-filter') === filterType);
       });
       if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
-      reloadLogs();
+      applyDialogsFilterAndRender();
     }
 
-    function onLogSearchInput() {
-      clearTimeout(logSearchTimer);
-      logSearchTimer = setTimeout(() => {
-        currentLogSearch = document.getElementById('log-search-input').value.trim();
-        reloadLogs();
-      }, 350);
-    }
-
-    function onLogChatSelectChange() {
-      currentLogChatId = document.getElementById('log-chat-select').value;
-      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
-      reloadLogs();
+    function onDialogSearchInput() {
+      clearTimeout(dialogSearchTimer);
+      dialogSearchTimer = setTimeout(() => {
+        currentDialogSearch = (document.getElementById('dialogs-search-input')?.value || "").trim().toLowerCase();
+        applyDialogsFilterAndRender();
+      }, 250);
     }
 
     function toggleAutoRefreshLogs(enabled) {
-      if (logAutoRefreshTimer) {
-        clearInterval(logAutoRefreshTimer);
-        logAutoRefreshTimer = null;
+      if (logsAutoRefreshTimer) {
+        clearInterval(logsAutoRefreshTimer);
+        logsAutoRefreshTimer = null;
       }
       if (enabled) {
-        logAutoRefreshTimer = setInterval(() => {
-          fetchLogs(false, true); // фоновое обновление
+        logsAutoRefreshTimer = setInterval(() => {
+          if (activeChatId) {
+            fetchChatMessages(activeChatId, activeChatFilter, false, true);
+          } else {
+            reloadDialogs(false, true);
+          }
         }, 5000);
-        showToast("Автообновление логов включено (5 сек)", "⏱");
+        showToast("Автообновление включено (5 сек)", "⏱");
       } else {
-        showToast("Автообновление логов выключено", "⏸");
+        showToast("Автообновление выключено", "⏸");
       }
     }
 
@@ -2515,59 +2757,41 @@
       }
     }
 
-    async function reloadLogs(showIndicator = false) {
-      logOffset = 0;
+    async function reloadDialogs(showIndicator = false, isSilent = false) {
+      const container = document.getElementById("dialogs-list-container");
+      const statusText = document.getElementById("dialogs-status-text");
+
       if (showIndicator) {
-        const btn = document.getElementById("logs-refresh-btn");
+        const btn = document.getElementById("dialogs-refresh-btn");
         if (btn) btn.style.transform = "rotate(180deg)";
         setTimeout(() => { if (btn) btn.style.transform = "none"; }, 300);
       }
-      await fetchLogs(false);
-    }
 
-    async function loadMoreLogs() {
-      logOffset += logLimit;
-      await fetchLogs(true);
-    }
-
-    async function fetchLogs(append = false, isSilent = false) {
-      const container = document.getElementById("logs-list-container");
-      const statusText = document.getElementById("logs-status-text");
-      const loadMoreBtn = document.getElementById("logs-load-more-btn");
-
-      if (!append && !isSilent) {
-        container.innerHTML = '<div style="text-align: center; padding: 30px 0; color: var(--hint-color);"><span style="display:inline-block; animation: spin 1s linear infinite; font-size:24px;">⏳</span><div style="margin-top:8px;">Загрузка сообщений…</div></div>';
+      if (!isSilent && (!cachedDialogsList || cachedDialogsList.length === 0)) {
+        container.innerHTML = '<div style="text-align: center; padding: 36px 0; color: var(--hint-color);"><span style="display:inline-block; animation: spin 1s linear infinite; font-size:24px;">⏳</span><div style="margin-top:8px;">Загрузка списка диалогов…</div></div>';
       }
 
       const initData = tg?.initData || "";
-      const params = new URLSearchParams({
-        filter: currentLogFilter,
-        limit: String(logLimit),
-        offset: String(logOffset),
-      });
-      if (currentLogSearch) params.set("search", currentLogSearch);
-      if (currentLogChatId) params.set("chat_id", currentLogChatId);
-
       try {
-        const res = await fetch(`/api/owner/messages?${params.toString()}`, {
+        const res = await fetch(`/api/owner/messages?limit=1`, {
           headers: { "Authorization": `tma ${initData}` }
         });
         if (!res.ok) {
           if (res.status === 403) {
-            container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Доступ к логам сообщений разрешен только создателю (владельцу) бота.</div>';
+            container.innerHTML = '<div style="text-align: center; padding: 24px; color: var(--danger); font-size:13px;">Доступ к логам сообщений разрешен только создателю (владельцу) бота.</div>';
           }
           return;
         }
         const data = await res.json();
         if (!data.ok) return;
 
-        // Переключатель автостопа
+        // Переключатель скрытого перехвата
         if (data.autostop_active !== undefined) {
           const autoSw = document.getElementById("logs-autostop-toggle");
           if (autoSw) autoSw.checked = Boolean(data.autostop_active);
         }
 
-        // Счетчики на фильтрах
+        // Обновляем общую статистику в бейджах фильтров
         const st = data.summary_stats || {};
         const elAll = document.getElementById("chip-cnt-all");
         if (elAll) elAll.textContent = st.all || 0;
@@ -2581,57 +2805,390 @@
         if (elMed) elMed.textContent = st.media || 0;
 
         const totalBadge = document.getElementById("logs-total-badge");
-        if (totalBadge) totalBadge.textContent = `${data.total} сообщений`;
+        if (totalBadge) totalBadge.textContent = `${st.all || 0} сообщений`;
 
-        // Обновляем список чатов в селекте
-        const chatSelect = document.getElementById("log-chat-select");
-        if (chatSelect && chatSelect.options.length <= 1 && data.chats) {
-          data.chats.forEach(ch => {
-            const opt = document.createElement("option");
-            opt.value = ch.chat_id;
-            opt.textContent = `${ch.title} (${ch.count} сообщ.)`;
-            chatSelect.appendChild(opt);
-          });
-        }
-
-        const messages = data.messages || [];
-
-        if (!append) {
-          container.innerHTML = "";
-        }
-
-        if (messages.length === 0 && !append) {
-          container.innerHTML = `
-            <div style="text-align: center; padding: 40px 20px; background: rgba(30, 41, 59, 0.4); border-radius: 14px; border: 1px dashed var(--card-border);">
-              <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
-              <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">Сообщения не найдены</div>
-              <div style="font-size: 12px; color: var(--hint-color);">Попробуйте изменить поисковый запрос или фильтр.</div>
-            </div>
-          `;
-          loadMoreBtn.style.display = "none";
-          statusText.textContent = `Найдено 0`;
-          return;
-        }
-
-        messages.forEach(msg => {
-          container.appendChild(createLogMessageCard(msg));
-        });
-
-        const currentCount = container.querySelectorAll(".log-card").length;
-        statusText.textContent = `Показано ${currentCount} из ${data.total}`;
-
-        if (currentCount < data.total) {
-          loadMoreBtn.style.display = "block";
-        } else {
-          loadMoreBtn.style.display = "none";
-        }
+        cachedDialogsList = data.chats || [];
+        applyDialogsFilterAndRender();
       } catch (err) {
-        console.error("Ошибка загрузки логов:", err);
-        if (!append) {
-          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Ошибка соединения с сервером при получении логов.</div>';
+        console.error("Ошибка загрузки диалогов:", err);
+        if (!isSilent) {
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Ошибка загрузки диалогов с сервера.</div>';
         }
       }
     }
+
+    function applyDialogsFilterAndRender() {
+      const container = document.getElementById("dialogs-list-container");
+      const statusText = document.getElementById("dialogs-status-text");
+
+      let filtered = cachedDialogsList.slice();
+
+      // Фильтрация по чипсам
+      if (currentDialogFilter === 'deleted') {
+        filtered = filtered.filter(ch => (ch.deleted_count || 0) > 0);
+      } else if (currentDialogFilter === 'edited') {
+        filtered = filtered.filter(ch => (ch.edited_count || 0) > 0);
+      } else if (currentDialogFilter === 'ephemeral') {
+        filtered = filtered.filter(ch => (ch.ephemeral_count || 0) > 0);
+      } else if (currentDialogFilter === 'media') {
+        filtered = filtered.filter(ch => (ch.media_type || (ch.last_snippet && ch.last_snippet.startsWith('['))));
+      }
+
+      // Фильтрация по поисковой строке
+      if (currentDialogSearch) {
+        const s = currentDialogSearch;
+        filtered = filtered.filter(ch => {
+          return (ch.title && ch.title.toLowerCase().includes(s)) ||
+                 (ch.username && ch.username.toLowerCase().includes(s)) ||
+                 String(ch.chat_id).includes(s) ||
+                 (ch.last_snippet && ch.last_snippet.toLowerCase().includes(s)) ||
+                 (ch.last_sender && ch.last_sender.toLowerCase().includes(s)) ||
+                 (ch.connection_owner_name && ch.connection_owner_name.toLowerCase().includes(s));
+        });
+      }
+
+      container.innerHTML = "";
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 36px 20px; background: rgba(30, 41, 59, 0.4); border-radius: 14px; border: 1px dashed var(--card-border); margin-top: 6px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">💬</div>
+            <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">Диалоги не найдены</div>
+            <div style="font-size: 12px; color: var(--hint-color);">Попробуйте выбрать другой фильтр или очистить строку поиска.</div>
+          </div>
+        `;
+        if (statusText) statusText.textContent = `Диалогов: 0`;
+        return;
+      }
+
+      filtered.forEach(ch => {
+        container.appendChild(renderDialogItem(ch));
+      });
+
+      if (statusText) statusText.textContent = `Диалогов: ${filtered.length}`;
+    }
+
+    function renderDialogItem(ch) {
+      const item = document.createElement("div");
+      item.className = "dialog-item" + (ch.deleted_count > 0 ? " has-deleted" : "");
+
+      const initial = (ch.title || "Ч")[0].toUpperCase();
+      const timeStr = ch.last_date ? formatDialogDate(ch.last_date) : "";
+
+      let badges = "";
+      if (ch.deleted_count > 0) {
+        badges += `<span class="dialog-badge del" title="Удалённых сообщений">🗑 ${ch.deleted_count}</span>`;
+      }
+      if (ch.edited_count > 0) {
+        badges += `<span class="dialog-badge ed" title="Отредактированных">✏️ ${ch.edited_count}</span>`;
+      }
+      if (ch.ephemeral_count > 0) {
+        badges += `<span class="dialog-badge" style="background: rgba(249, 115, 22, 0.25); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.4);" title="Одноразовых">🔥 ${ch.ephemeral_count}</span>`;
+      }
+      badges += `<span class="dialog-badge cnt">${ch.count} сообщ.</span>`;
+
+      let subText = ch.username ? `@${escapeHtml(ch.username)}` : `ID: ${ch.chat_id}`;
+      if (ch.connection_owner_name) {
+        subText += ` • 👤 ${escapeHtml(ch.connection_owner_name)}`;
+      }
+
+      let snippet = escapeHtml(ch.last_snippet || "Нет сообщений");
+      if (ch.last_sender) {
+        snippet = `<span style="color: var(--text-color); font-weight: 500;">${escapeHtml(ch.last_sender)}:</span> ${snippet}`;
+      }
+
+      item.innerHTML = `
+        <div class="dialog-avatar">${initial}</div>
+        <div class="dialog-content">
+          <div class="dialog-header-row">
+            <div class="dialog-title">${escapeHtml(ch.title)}</div>
+            <div class="dialog-time">${timeStr}</div>
+          </div>
+          <div class="dialog-sub-row">
+            <span>${subText}</span>
+          </div>
+          <div class="dialog-body-row">
+            <div class="dialog-snippet">${snippet}</div>
+            <div class="dialog-badges-group">${badges}</div>
+          </div>
+        </div>
+      `;
+
+      item.onclick = () => {
+        openChatDialogue(ch.chat_id, ch.title, ch.connection_owner_name || "", ch.connection_owner_id);
+      };
+
+      return item;
+    }
+
+    // ─── Открытие и управление чат-диалогом ───
+
+    function openChatDialogue(chatId, title, ownerName, ownerId) {
+      activeChatId = chatId;
+      activeChatTitle = title || `Чат ${chatId}`;
+      activeChatOwnerName = ownerName || "";
+      activeChatOwnerId = ownerId || null;
+      activeChatFilter = 'all';
+
+      // Переключаем видимость экранов
+      document.getElementById("dialogs-list-view").style.display = "none";
+      const activeChatView = document.getElementById("active-chat-view");
+      activeChatView.style.display = "block";
+
+      // Заголовок и подзаголовок
+      document.getElementById("active-chat-avatar").textContent = (activeChatTitle[0] || "💬").toUpperCase();
+      document.getElementById("active-chat-title").textContent = activeChatTitle;
+      let subtitle = `ID: ${chatId}`;
+      if (activeChatOwnerName) {
+        subtitle += ` • Бизнес: ${activeChatOwnerName}`;
+      }
+      document.getElementById("active-chat-subtitle").textContent = subtitle;
+
+      // Сбрасываем фильтр чата на "Все"
+      const sel = document.getElementById("chat-filter-select");
+      if (sel) sel.value = "all";
+
+      // Слушатель скролла для плавающей кнопки вниз
+      const stream = document.getElementById("chat-messages-stream");
+      if (stream) {
+        stream.onscroll = () => {
+          const btn = document.getElementById("chat-scroll-bottom-btn");
+          if (!btn) return;
+          const distToBottom = stream.scrollHeight - stream.scrollTop - stream.clientHeight;
+          btn.style.display = distToBottom > 150 ? "flex" : "none";
+        };
+      }
+
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+
+      fetchChatMessages(chatId, 'all', true);
+    }
+
+    function closeChatDialogue() {
+      activeChatId = null;
+      document.getElementById("active-chat-view").style.display = "none";
+      document.getElementById("dialogs-list-view").style.display = "block";
+
+      if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred("light");
+
+      reloadDialogs(false, false);
+    }
+
+    function onChatFilterChange() {
+      const sel = document.getElementById("chat-filter-select");
+      activeChatFilter = sel ? sel.value : "all";
+      if (activeChatId) {
+        fetchChatMessages(activeChatId, activeChatFilter, true);
+      }
+    }
+
+    function refreshActiveChat() {
+      if (activeChatId) {
+        fetchChatMessages(activeChatId, activeChatFilter, false);
+      }
+    }
+
+    function scrollChatToBottom(smooth = true) {
+      const stream = document.getElementById("chat-messages-stream");
+      if (stream) {
+        stream.scrollTo({
+          top: stream.scrollHeight,
+          behavior: smooth ? "smooth" : "auto"
+        });
+      }
+    }
+
+    async function fetchChatMessages(chatId, filter = 'all', shouldScroll = false, isSilent = false) {
+      const stream = document.getElementById("chat-messages-stream");
+      if (!stream) return;
+
+      if (!isSilent && stream.children.length === 0) {
+        stream.innerHTML = '<div style="text-align: center; padding: 40px 0; color: var(--hint-color);"><span style="display:inline-block; animation: spin 1s linear infinite; font-size:24px;">⏳</span><div style="margin-top:8px;">Загрузка истории чата…</div></div>';
+      }
+
+      const initData = tg?.initData || "";
+      const params = new URLSearchParams({
+        chat_id: String(chatId),
+        order: "asc",
+        limit: "150",
+        filter: filter
+      });
+
+      try {
+        const res = await fetch(`/api/owner/messages?${params.toString()}`, {
+          headers: { "Authorization": `tma ${initData}` }
+        });
+        if (!res.ok) {
+          if (res.status === 403) {
+            stream.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--danger);">Доступ запрещен. Только для владельца бота.</div>';
+          }
+          return;
+        }
+        const data = await res.json();
+        if (!data.ok) return;
+
+        const messages = data.messages || [];
+
+        // Сохраняем текущую позицию скролла если тихое обновление
+        const prevScrollTop = stream.scrollTop;
+        const prevScrollHeight = stream.scrollHeight;
+        const isNearBottom = (prevScrollHeight - prevScrollTop - stream.clientHeight) < 80;
+
+        stream.innerHTML = "";
+
+        if (messages.length === 0) {
+          stream.innerHTML = `
+            <div style="text-align: center; padding: 50px 20px; color: var(--hint-color);">
+              <div style="font-size: 36px; margin-bottom: 8px;">📭</div>
+              <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">В этом чате нет сообщений по выбранному фильтру</div>
+              <div style="font-size: 12px;">Попробуйте выбрать фильтр «Все»</div>
+            </div>
+          `;
+          return;
+        }
+
+        let lastDateKey = null;
+
+        messages.forEach(msg => {
+          // Разделитель по дням (календарный разделитель)
+          const msgDayKey = getDayKey(msg.date);
+          if (msgDayKey !== lastDateKey) {
+            lastDateKey = msgDayKey;
+            const datePill = document.createElement("div");
+            datePill.className = "chat-date-pill";
+            datePill.textContent = formatDatePill(msg.date);
+            stream.appendChild(datePill);
+          }
+
+          stream.appendChild(createChatBubble(msg));
+        });
+
+        if (shouldScroll || isNearBottom) {
+          setTimeout(() => scrollChatToBottom(false), 30);
+        } else if (isSilent) {
+          // Сохраняем позицию скролла
+          stream.scrollTop = prevScrollTop + (stream.scrollHeight - prevScrollHeight);
+        }
+      } catch (err) {
+        console.error("Ошибка загрузки сообщений чата:", err);
+      }
+    }
+
+    function createChatBubble(msg) {
+      // Определяем направление сообщения: входящее или исходящее
+      let isOutgoing = false;
+      if (activeChatOwnerId && msg.from_user_id === activeChatOwnerId) {
+        isOutgoing = true;
+      } else if (msg.connection_owner_id && msg.from_user_id === msg.connection_owner_id) {
+        isOutgoing = true;
+      } else if (!activeChatOwnerId && !msg.connection_owner_id && msg.from_user_id !== msg.chat_id) {
+        isOutgoing = true;
+      }
+
+      const row = document.createElement("div");
+      row.className = `bubble-row ${isOutgoing ? 'outgoing' : 'incoming'}`;
+
+      let bubbleClass = "bubble";
+      if (msg.is_deleted) bubbleClass += " deleted-bubble";
+      if (msg.is_edited) bubbleClass += " edited-bubble";
+
+      const bubble = document.createElement("div");
+      bubble.className = bubbleClass;
+
+      // Заголовок отправителя
+      const senderName = escapeHtml(msg.from_user_name || "Пользователь");
+      const senderSub = msg.from_username ? ` (@${escapeHtml(msg.from_username)})` : "";
+      let senderHtml = `<div class="bubble-sender">${senderName}${senderSub}</div>`;
+
+      // Бейджи (Удалено, Отредактировано, Одноразовое, Медиа)
+      let badgesHtml = "";
+      if (msg.is_deleted) {
+        const delTime = msg.deleted_at ? ` ${formatBubbleTime(msg.deleted_at)}` : "";
+        badgesHtml += `<div class="bubble-badge badge-del">🗑 УДАЛЕНО${delTime}</div>`;
+      }
+      if (msg.is_edited) {
+        const edTime = msg.edited_at ? ` ${formatBubbleTime(msg.edited_at)}` : "";
+        badgesHtml += `<div class="bubble-badge badge-ed" onclick="toggleBubbleDiff(this)">✏️ ИЗМЕНЕНО${edTime} ▾</div>`;
+      }
+      if (msg.is_ephemeral) {
+        badgesHtml += `<div class="bubble-badge badge-eph">🔥 ОДНОРАЗОВОЕ</div>`;
+      }
+      if (msg.media_type) {
+        badgesHtml += `<div class="bubble-badge" style="background: rgba(59, 130, 246, 0.25); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);">${getMediaLabel(msg.media_type)}</div>`;
+      }
+
+      // Текст и сравнение версий (Diff)
+      let contentHtml = "";
+      if (msg.is_edited && msg.original_text && msg.original_text !== msg.text) {
+        contentHtml = `
+          <div class="bubble-diff-box">
+            <div class="bubble-diff-old">🔻 <b>Было:</b> ${escapeHtml(msg.original_text)}</div>
+            <div class="bubble-diff-new">🔺 <b>Стало:</b> ${escapeHtml(msg.text || '(сообщение очищено)')}</div>
+          </div>
+        `;
+      } else if (msg.text) {
+        contentHtml = `<div class="bubble-text">${escapeHtml(msg.text)}</div>`;
+      } else if (msg.is_deleted) {
+        contentHtml = `<div class="bubble-text" style="color: var(--hint-color); font-style: italic;">(содержимое удалено)</div>`;
+      }
+
+      // Медиавложения
+      let mediaHtml = "";
+      if (msg.media_type) {
+        if (msg.has_media_file && msg.media_type === "photo") {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="bubble-media-preview">
+              <img src="${mediaUrl}" class="bubble-media-img" loading="lazy" alt="Фото" onclick="window.open('${mediaUrl}', '_blank')">
+            </div>
+          `;
+        } else if (msg.has_media_file && (msg.media_type === "voice" || msg.media_type === "audio")) {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="bubble-media-preview">
+              <audio controls src="${mediaUrl}" style="width: 100%; height: 36px; border-radius: 8px;"></audio>
+            </div>
+          `;
+        } else if (msg.has_media_file && msg.media_type === "video") {
+          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+          mediaHtml = `
+            <div class="bubble-media-preview">
+              <video controls src="${mediaUrl}" style="max-width: 100%; max-height: 240px; border-radius: 8px;"></video>
+            </div>
+          `;
+        } else {
+          mediaHtml = `
+            <div style="font-size: 11px; opacity: 0.7; margin-top: 5px;">
+              📎 Медиа: ${msg.has_media_file ? "✅ сохранено" : "❌ не сохранено"}
+            </div>
+          `;
+        }
+      }
+
+      // Нижний мета-блок сообщения
+      const timeStr = formatBubbleTime(msg.date);
+      const ticks = isOutgoing ? ' • <span>✓✓</span>' : '';
+      const metaHtml = `
+        <div class="bubble-meta">
+          <span>#${msg.message_id}</span> • <span>${timeStr}</span>${ticks}
+        </div>
+      `;
+
+      bubble.innerHTML = `${senderHtml}${badgesHtml}${contentHtml}${mediaHtml}${metaHtml}`;
+      row.appendChild(bubble);
+      return row;
+    }
+
+    function toggleBubbleDiff(badgeElem) {
+      const bubble = badgeElem.closest(".bubble");
+      if (!bubble) return;
+      const diffBox = bubble.querySelector(".bubble-diff-box");
+      if (diffBox) {
+        diffBox.style.display = (diffBox.style.display === "none") ? "block" : "none";
+      }
+    }
+
+    // ─── Вспомогательные функции дат и форматирования ───
 
     function escapeHtml(str) {
       if (!str) return "";
@@ -2641,22 +3198,6 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
-    }
-
-    function formatLogDate(isoStr) {
-      if (!isoStr) return "";
-      try {
-        const d = new Date(isoStr);
-        if (isNaN(d.getTime())) return isoStr;
-        const day = String(d.getDate()).padStart(2, "0");
-        const mon = String(d.getMonth() + 1).padStart(2, "0");
-        const hr = String(d.getHours()).padStart(2, "0");
-        const min = String(d.getMinutes()).padStart(2, "0");
-        const sec = String(d.getSeconds()).padStart(2, "0");
-        return `${day}.${mon} в ${hr}:${min}:${sec}`;
-      } catch (e) {
-        return isoStr;
-      }
     }
 
     function getMediaLabel(type) {
@@ -2671,113 +3212,67 @@
       return m[type] || `📁 ${type}`;
     }
 
-    function createLogMessageCard(msg) {
-      const card = document.createElement("div");
-      let cardClass = "log-card";
-      if (msg.is_deleted) cardClass += " deleted-card";
-      else if (msg.is_edited) cardClass += " edited-card";
-      else if (msg.is_ephemeral) cardClass += " ephemeral-card";
-      card.className = cardClass;
+    function formatBubbleTime(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const hr = String(d.getHours()).padStart(2, "0");
+        const min = String(d.getMinutes()).padStart(2, "0");
+        return `${hr}:${min}`;
+      } catch (e) {
+        return "";
+      }
+    }
 
-      const initial = (msg.from_user_name || "U")[0].toUpperCase();
+    function getDayKey(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+      } catch (e) {
+        return "";
+      }
+    }
 
-      // Пометки (Badges)
-      let badgesHtml = "";
-      if (msg.is_deleted) {
-        const delTime = msg.deleted_at ? ` в ${formatLogDate(msg.deleted_at)}` : "";
-        badgesHtml += `<span class="badge-pill badge-deleted">🗑 УДАЛЕНО${delTime}</span>`;
-      }
-      if (msg.is_edited) {
-        const edTime = msg.edited_at ? ` в ${formatLogDate(msg.edited_at)}` : "";
-        badgesHtml += `<span class="badge-pill badge-edited">✏️ ОТРЕДАКТИРОВАНО${edTime}</span>`;
-      }
-      if (msg.is_ephemeral) {
-        badgesHtml += `<span class="badge-pill badge-ephemeral">🔥 ОДНОРАЗОВОЕ</span>`;
-      }
-      if (msg.media_type) {
-        badgesHtml += `<span class="badge-pill badge-media">${getMediaLabel(msg.media_type)}</span>`;
-      }
-      badgesHtml += `<span class="badge-pill badge-chat-tag">💬 Чат: ${escapeHtml(msg.chat_title)} [${msg.chat_id}]</span>`;
-      if (msg.connection_owner_name) {
-        badgesHtml += `<span class="badge-pill badge-chat-tag">👤 Бизнес: ${escapeHtml(msg.connection_owner_name)}</span>`;
-      }
+    function formatDatePill(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const today = new Date();
+        const yesterday = new Date();
+        yesterday.setDate(today.getDate() - 1);
 
-      // Текст / Содержимое (сравнение версий при редактировании)
-      let contentHtml = "";
-      if (msg.is_edited && msg.original_text && msg.original_text !== msg.text) {
-        contentHtml = `
-          <div class="diff-container">
-            <div class="diff-section">
-              <div class="diff-label old">🔻 Было (до редактирования):</div>
-              <div class="diff-content">${escapeHtml(msg.original_text)}</div>
-            </div>
-            <div class="diff-section">
-              <div class="diff-label new">🔺 Стало (текущее):</div>
-              <div class="diff-content">${escapeHtml(msg.text || "(текст удален)")}</div>
-            </div>
-          </div>
-        `;
-      } else if (msg.text) {
-        contentHtml = `<div class="msg-text-bubble">${escapeHtml(msg.text)}</div>`;
-      } else if (!msg.media_type) {
-        contentHtml = `<div class="msg-text-bubble" style="color: var(--hint-color); font-style: italic;">(пустое сообщение)</div>`;
-      }
-
-      // Вложения (Фото, Видео, Аудио/Голос)
-      let mediaHtml = "";
-      if (msg.media_type) {
-        if (msg.has_media_file && msg.media_type === "photo") {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
-          mediaHtml = `
-            <div class="log-media-preview">
-              <img src="${mediaUrl}" class="log-media-thumb" loading="lazy" alt="Медиа" onclick="window.open('${mediaUrl}', '_blank')">
-            </div>
-          `;
-        } else if (msg.has_media_file && (msg.media_type === "voice" || msg.media_type === "audio")) {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
-          mediaHtml = `
-            <div class="log-media-preview">
-              <audio controls src="${mediaUrl}" style="width: 100%; height: 36px; border-radius: 8px;"></audio>
-            </div>
-          `;
-        } else if (msg.has_media_file && msg.media_type === "video") {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
-          mediaHtml = `
-            <div class="log-media-preview">
-              <video controls src="${mediaUrl}" style="max-width: 100%; max-height: 220px; border-radius: 8px;"></video>
-            </div>
-          `;
-        } else {
-          mediaHtml = `
-            <div style="font-size: 11px; color: var(--hint-color); margin-top: 6px;">
-              📎 Файл сохранен: ${msg.has_media_file ? "✅ на сервере" : "❌ отсутствует"}
-            </div>
-          `;
+        if (d.toDateString() === today.toDateString()) {
+          return "Сегодня";
         }
+        if (d.toDateString() === yesterday.toDateString()) {
+          return "Вчера";
+        }
+
+        return d.toLocaleDateString("ru-RU", { day: 'numeric', month: 'long', year: (d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined) });
+      } catch (e) {
+        return isoStr;
       }
+    }
 
-      card.innerHTML = `
-        <div class="log-card-header">
-          <div class="log-sender-box">
-            <div class="log-avatar">${initial}</div>
-            <div class="log-sender-meta">
-              <div class="log-sender-name">${escapeHtml(msg.from_user_name)}</div>
-              <div class="log-sender-sub">${msg.from_username ? '@' + escapeHtml(msg.from_username) : 'ID: ' + msg.from_user_id}</div>
-            </div>
-          </div>
-          <div class="log-timestamp">${formatLogDate(msg.date)}</div>
-        </div>
-
-        <div class="log-badges-row">${badgesHtml}</div>
-        <div class="log-body">${contentHtml}${mediaHtml}</div>
-
-        <div class="log-footer">
-          <span>Msg ID: <code>#${msg.message_id}</code></span>
-          <span>${msg.business_connection_id ? 'Бизнес-аккаунт' : 'Личный чат'}</span>
-        </div>
-      `;
-
-      return card;
+    function formatDialogDate(isoStr) {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return isoStr;
+        const today = new Date();
+        if (d.toDateString() === today.toDateString()) {
+          const hr = String(d.getHours()).padStart(2, "0");
+          const min = String(d.getMinutes()).padStart(2, "0");
+          return `${hr}:${min}`;
+        }
+        return d.toLocaleDateString("ru-RU", { day: 'numeric', month: 'short' });
+      } catch (e) {
+        return "";
+      }
     }
 
     // Дата сегодня

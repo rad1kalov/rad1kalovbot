@@ -778,8 +778,11 @@ class WebAppHandler:
         flt = request.query.get("filter", "all").strip().lower()
         search = request.query.get("search", "").strip()
         chat_id_q = request.query.get("chat_id", "").strip()
+        order_param = request.query.get("order", "desc").strip().lower()
+        order_by_sql = "ORDER BY date ASC, message_id ASC" if order_param == "asc" else "ORDER BY date DESC, message_id DESC"
+
         try:
-            limit = min(max(int(request.query.get("limit", 40)), 1), 100)
+            limit = min(max(int(request.query.get("limit", 40)), 1), 200)
         except (ValueError, TypeError):
             limit = 40
         try:
@@ -843,7 +846,7 @@ class WebAppHandler:
                    is_ephemeral, is_deleted, deleted_at, is_edited, edited_at, original_text
             FROM messages
             {where_sql}
-            ORDER BY date DESC, message_id DESC
+            {order_by_sql}
             LIMIT ? OFFSET ?
         """
         rows = self.conn.execute(data_sql, params + [limit, offset]).fetchall()
@@ -857,13 +860,18 @@ class WebAppHandler:
         for r in self.conn.execute("SELECT business_connection_id, user_id, first_name FROM settings WHERE business_connection_id IS NOT NULL").fetchall():
             conn_map[r[0]] = (r[1], r[2] or "")
 
-        # Список уникальных чатов для выпадающего списка фильтра
+        # Список диалогов для чат-интерфейса со статистикой каждого диалога
         chat_rows = self.conn.execute("""
-            SELECT chat_id, COUNT(*) as cnt, MAX(date) as last_d
+            SELECT chat_id, 
+                   COUNT(*) as cnt, 
+                   MAX(date) as last_d,
+                   COALESCE(SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END), 0) as del_cnt,
+                   COALESCE(SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END), 0) as ed_cnt,
+                   COALESCE(SUM(CASE WHEN is_ephemeral = 1 THEN 1 ELSE 0 END), 0) as eph_cnt
             FROM messages
             GROUP BY chat_id
             ORDER BY last_d DESC
-            LIMIT 50
+            LIMIT 100
         """).fetchall()
 
         chats_list = []
@@ -871,10 +879,42 @@ class WebAppHandler:
             cid = cr[0]
             c_name, c_user = user_map.get(cid, ("", ""))
             title = c_name or (f"@{c_user}" if c_user else f"Чат {cid}")
+
+            last_msg = self.conn.execute("""
+                SELECT from_user_name, text, media_type, date, business_connection_id, is_deleted, is_edited
+                FROM messages
+                WHERE chat_id = ?
+                ORDER BY date DESC, message_id DESC LIMIT 1
+            """, (cid,)).fetchone()
+
+            last_snippet = ""
+            last_sender_str = ""
+            bc_id = None
+            if last_msg:
+                last_sender_str = last_msg[0] or "Пользователь"
+                if last_msg[1]:
+                    last_snippet = last_msg[1]
+                elif last_msg[2]:
+                    last_snippet = f"[{last_msg[2]}]"
+                elif last_msg[5]:
+                    last_snippet = "(сообщение удалено)"
+                bc_id = last_msg[4]
+
+            conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
+
             chats_list.append({
                 "chat_id": cid,
                 "title": title,
+                "username": c_user,
                 "count": cr[1],
+                "last_date": cr[2],
+                "deleted_count": cr[3],
+                "edited_count": cr[4],
+                "ephemeral_count": cr[5],
+                "last_snippet": last_snippet,
+                "last_sender": last_sender_str,
+                "connection_owner_id": conn_owner_id,
+                "connection_owner_name": conn_owner_name,
             })
 
         msg_list = []
