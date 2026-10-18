@@ -104,6 +104,8 @@ def get_auth_user(request: web.Request, bot_token: str, default_owner_id: int) -
         init_data = auth_header[4:].strip()
     elif "tgWebAppData" in request.query:
         init_data = request.query.get("tgWebAppData", "").strip()
+    elif "init_data" in request.query:
+        init_data = request.query.get("init_data", "").strip()
 
     if init_data:
         validated = validate_telegram_init_data(init_data, bot_token)
@@ -778,11 +780,13 @@ class WebAppHandler:
         flt = request.query.get("filter", "all").strip().lower()
         search = request.query.get("search", "").strip()
         chat_id_q = request.query.get("chat_id", "").strip()
+        dialog_id_q = request.query.get("dialog_id", "").strip()
+        owner_id_q = request.query.get("owner_id", "").strip()
         order_param = request.query.get("order", "desc").strip().lower()
         order_by_sql = "ORDER BY date ASC, message_id ASC" if order_param == "asc" else "ORDER BY date DESC, message_id DESC"
 
         try:
-            limit = min(max(int(request.query.get("limit", 40)), 1), 200)
+            limit = min(max(int(request.query.get("limit", 40)), 1), 300)
         except (ValueError, TypeError):
             limit = 40
         try:
@@ -821,10 +825,39 @@ class WebAppHandler:
         elif flt == "media":
             where_clauses.append("(media_type IS NOT NULL AND media_type != '')")
 
-        if chat_id_q:
+        # Фильтр по конкретному диалогу (включает сообщения ОБОИХ участников: собеседника и владельца бизнес-аккаунта)
+        if dialog_id_q and "_" in dialog_id_q:
             try:
-                where_clauses.append("chat_id = ?")
-                params.append(int(chat_id_q))
+                u1_str, u2_str = dialog_id_q.split("_")[:2]
+                u1, u2 = int(u1_str), int(u2_str)
+                where_clauses.append("""(
+                    (chat_id = ? AND from_user_id = ?)
+                    OR (chat_id = ? AND from_user_id = ?)
+                    OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
+                    OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
+                    OR (chat_id = ? AND from_user_id = ?)
+                    OR (chat_id = ? AND from_user_id = ?)
+                )""")
+                params.extend([u1, u2, u2, u1, u1, u2, u2, u1, u1, u1, u2, u2])
+            except (ValueError, TypeError):
+                pass
+        elif chat_id_q:
+            try:
+                cid = int(chat_id_q)
+                oid = int(owner_id_q) if owner_id_q and owner_id_q.isdigit() else None
+                if oid and oid != cid:
+                    where_clauses.append("""(
+                        (chat_id = ? AND from_user_id = ?)
+                        OR (chat_id = ? AND from_user_id = ?)
+                        OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
+                        OR (chat_id = ? AND business_connection_id IN (SELECT business_connection_id FROM settings WHERE user_id = ?))
+                        OR (chat_id = ? AND from_user_id = ?)
+                        OR (chat_id = ? AND from_user_id = ?)
+                    )""")
+                    params.extend([cid, oid, oid, cid, cid, oid, oid, cid, cid, cid, oid, oid])
+                else:
+                    where_clauses.append("chat_id = ?")
+                    params.append(cid)
             except ValueError:
                 pass
 
@@ -860,62 +893,73 @@ class WebAppHandler:
         for r in self.conn.execute("SELECT business_connection_id, user_id, first_name FROM settings WHERE business_connection_id IS NOT NULL").fetchall():
             conn_map[r[0]] = (r[1], r[2] or "")
 
-        # Список диалогов для чат-интерфейса со статистикой каждого диалога
-        chat_rows = self.conn.execute("""
-            SELECT chat_id, 
-                   COUNT(*) as cnt, 
-                   MAX(date) as last_d,
-                   COALESCE(SUM(CASE WHEN is_deleted = 1 THEN 1 ELSE 0 END), 0) as del_cnt,
-                   COALESCE(SUM(CASE WHEN is_edited = 1 THEN 1 ELSE 0 END), 0) as ed_cnt,
-                   COALESCE(SUM(CASE WHEN is_ephemeral = 1 THEN 1 ELSE 0 END), 0) as eph_cnt
+        # Формируем объединённый список диалогов со статистикой
+        all_msgs_meta = self.conn.execute("""
+            SELECT message_id, chat_id, from_user_id, from_user_name, text, media_type,
+                   date, business_connection_id, is_deleted, is_edited, is_ephemeral
             FROM messages
-            GROUP BY chat_id
-            ORDER BY last_d DESC
-            LIMIT 100
+            ORDER BY date DESC, message_id DESC
         """).fetchall()
 
-        chats_list = []
-        for cr in chat_rows:
-            cid = cr[0]
-            c_name, c_user = user_map.get(cid, ("", ""))
-            title = c_name or (f"@{c_user}" if c_user else f"Чат {cid}")
-
-            last_msg = self.conn.execute("""
-                SELECT from_user_name, text, media_type, date, business_connection_id, is_deleted, is_edited
-                FROM messages
-                WHERE chat_id = ?
-                ORDER BY date DESC, message_id DESC LIMIT 1
-            """, (cid,)).fetchone()
-
-            last_snippet = ""
-            last_sender_str = ""
-            bc_id = None
-            if last_msg:
-                last_sender_str = last_msg[0] or "Пользователь"
-                if last_msg[1]:
-                    last_snippet = last_msg[1]
-                elif last_msg[2]:
-                    last_snippet = f"[{last_msg[2]}]"
-                elif last_msg[5]:
-                    last_snippet = "(сообщение удалено)"
-                bc_id = last_msg[4]
-
+        dialogue_map = {}
+        for m in all_msgs_meta:
+            (m_id, c_id, f_uid, f_uname, txt, m_type, dt, bc_id, is_del, is_ed, is_eph) = m
             conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
+            
+            # Определяем двух участников диалога
+            if conn_owner_id:
+                p_owner = conn_owner_id
+                p_interlocutor = c_id if f_uid == conn_owner_id else f_uid
+            else:
+                p_owner = self.owner_id
+                p_interlocutor = c_id
 
-            chats_list.append({
-                "chat_id": cid,
-                "title": title,
-                "username": c_user,
-                "count": cr[1],
-                "last_date": cr[2],
-                "deleted_count": cr[3],
-                "edited_count": cr[4],
-                "ephemeral_count": cr[5],
-                "last_snippet": last_snippet,
-                "last_sender": last_sender_str,
-                "connection_owner_id": conn_owner_id,
-                "connection_owner_name": conn_owner_name,
-            })
+            if not p_interlocutor:
+                p_interlocutor = c_id
+
+            pair = tuple(sorted([p_owner, p_interlocutor]))
+            if pair not in dialogue_map:
+                # Если один из участников владелец бота, собеседник — другой
+                if self.owner_id in pair:
+                    interlocutor_id = pair[0] if pair[1] == self.owner_id else pair[1]
+                    business_owner_id = self.owner_id
+                else:
+                    interlocutor_id = p_interlocutor
+                    business_owner_id = p_owner
+
+                c_name, c_user = user_map.get(interlocutor_id, ("", ""))
+                title = c_name or (f"@{c_user}" if c_user else f"Чат {interlocutor_id}")
+
+                b_owner_name = conn_map.get(bc_id, (None, None))[1] or user_map.get(business_owner_id, ("Владелец", ""))[0]
+
+                dialogue_map[pair] = {
+                    "dialog_id": f"{pair[0]}_{pair[1]}",
+                    "chat_id": interlocutor_id,
+                    "title": title,
+                    "username": c_user,
+                    "count": 0,
+                    "last_date": dt,
+                    "deleted_count": 0,
+                    "edited_count": 0,
+                    "ephemeral_count": 0,
+                    "last_snippet": "",
+                    "last_sender": "",
+                    "connection_owner_id": business_owner_id,
+                    "connection_owner_name": b_owner_name,
+                }
+
+            d = dialogue_map[pair]
+            d["count"] += 1
+            if is_del: d["deleted_count"] += 1
+            if is_ed: d["edited_count"] += 1
+            if is_eph: d["ephemeral_count"] += 1
+            if not d["last_snippet"]:
+                if txt: d["last_snippet"] = txt
+                elif m_type: d["last_snippet"] = f"[{m_type}]"
+                elif is_del: d["last_snippet"] = "(сообщение удалено)"
+                d["last_sender"] = f_uname or user_map.get(f_uid, ("Пользователь", ""))[0] or "Пользователь"
+
+        chats_list = sorted(dialogue_map.values(), key=lambda x: x["last_date"] or "", reverse=True)[:100]
 
         msg_list = []
         for r in rows:
@@ -927,6 +971,9 @@ class WebAppHandler:
             conn_owner_id, conn_owner_name = conn_map.get(bc_id, (None, None))
 
             has_file = bool(m_path and os.path.exists(m_path))
+            media_token = None
+            if has_file and m_path:
+                media_token = hmac.new(self.bot_token.encode("utf-8"), m_path.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
 
             msg_list.append({
                 "message_id": m_id,
@@ -939,6 +986,7 @@ class WebAppHandler:
                 "original_text": orig_txt,
                 "media_path": m_path,
                 "has_media_file": has_file,
+                "media_token": media_token,
                 "media_type": m_type,
                 "date": dt,
                 "business_connection_id": bc_id,
@@ -964,19 +1012,34 @@ class WebAppHandler:
 
     async def handle_owner_get_media(self, request: web.Request) -> web.Response:
         """Отдает сохраненный медиафайл владельцу для просмотра в webapp."""
-        user, err_resp = self._require_owner(request)
-        if err_resp:
-            return err_resp
-
         rel_path = request.query.get("path", "").strip()
         if not rel_path:
             return web.Response(text="Path is required", status=400)
+
+        # Проверка HMAC-токена доступа к медиафайлу
+        token = request.query.get("token", "").strip()
+        expected_token = hmac.new(self.bot_token.encode("utf-8"), rel_path.encode("utf-8"), hashlib.sha256).hexdigest()[:32]
+        has_valid_token = bool(token and hmac.compare_digest(token, expected_token))
+
+        if not has_valid_token:
+            user, err_resp = self._require_owner(request)
+            if err_resp:
+                return err_resp
 
         safe_path = os.path.abspath(rel_path)
         if not os.path.exists(safe_path) or not os.path.isfile(safe_path):
             return web.Response(text="File not found", status=404)
 
-        return web.FileResponse(safe_path)
+        ext = os.path.splitext(safe_path)[1].lower()
+        headers = {"Accept-Ranges": "bytes"}
+        if ext in (".oga", ".ogg", ".opus"):
+            headers["Content-Type"] = "audio/ogg; codecs=opus"
+        elif ext == ".webp":
+            headers["Content-Type"] = "image/webp"
+        elif ext == ".mp4":
+            headers["Content-Type"] = "video/mp4"
+
+        return web.FileResponse(safe_path, headers=headers)
 
     async def handle_owner_toggle_autostop(self, request: web.Request) -> web.Response:
         """Переключает перехват удаленных и одноразовых сообщений."""

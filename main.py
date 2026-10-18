@@ -1127,7 +1127,7 @@ def main():
     async def run():
         await app.initialize()
         await app.start()
-        await app.updater.start_polling()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
 
         if WEBAPP_URL:
             try:

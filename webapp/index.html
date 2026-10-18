@@ -2661,6 +2661,7 @@
 
     // Состояние открытого чата
     let activeChatId = null;
+    let activeChatDialogId = null;
     let activeChatTitle = '';
     let activeChatOwnerName = '';
     let activeChatOwnerId = null;
@@ -2915,7 +2916,7 @@
       `;
 
       item.onclick = () => {
-        openChatDialogue(ch.chat_id, ch.title, ch.connection_owner_name || "", ch.connection_owner_id);
+        openChatDialogue(ch.chat_id, ch.title, ch.connection_owner_name || "", ch.connection_owner_id, ch.dialog_id);
       };
 
       return item;
@@ -2923,8 +2924,9 @@
 
     // ─── Открытие и управление чат-диалогом ───
 
-    function openChatDialogue(chatId, title, ownerName, ownerId) {
+    function openChatDialogue(chatId, title, ownerName, ownerId, dialogId) {
       activeChatId = chatId;
+      activeChatDialogId = dialogId || null;
       activeChatTitle = title || `Чат ${chatId}`;
       activeChatOwnerName = ownerName || "";
       activeChatOwnerId = ownerId || null;
@@ -2966,6 +2968,7 @@
 
     function closeChatDialogue() {
       activeChatId = null;
+      activeChatDialogId = null;
       document.getElementById("active-chat-view").style.display = "none";
       document.getElementById("dialogs-list-view").style.display = "block";
 
@@ -3010,9 +3013,11 @@
       const params = new URLSearchParams({
         chat_id: String(chatId),
         order: "asc",
-        limit: "150",
+        limit: "250",
         filter: filter
       });
+      if (activeChatDialogId) params.set("dialog_id", activeChatDialogId);
+      if (activeChatOwnerId) params.set("owner_id", String(activeChatOwnerId));
 
       try {
         const res = await fetch(`/api/owner/messages?${params.toString()}`, {
@@ -3074,14 +3079,28 @@
       }
     }
 
+    function getMediaUrl(mediaPath, token) {
+      if (!mediaPath) return "";
+      const initData = tg?.initData || "";
+      const params = new URLSearchParams({ path: mediaPath });
+      if (token) params.set("token", token);
+      if (initData) params.set("init_data", initData);
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("dev") === "1") {
+        params.set("dev", "1");
+        if (urlParams.get("user_id")) params.set("user_id", urlParams.get("user_id"));
+      }
+      return `/api/owner/media?${params.toString()}`;
+    }
+
     function createChatBubble(msg) {
-      // Определяем направление сообщения: входящее или исходящее
+      // Сообщение исходящее (справа), если отправлено тем, к кому подключен бот
       let isOutgoing = false;
       if (activeChatOwnerId && msg.from_user_id === activeChatOwnerId) {
         isOutgoing = true;
       } else if (msg.connection_owner_id && msg.from_user_id === msg.connection_owner_id) {
         isOutgoing = true;
-      } else if (!activeChatOwnerId && !msg.connection_owner_id && msg.from_user_id !== msg.chat_id) {
+      } else if (activeChatId && msg.from_user_id !== activeChatId) {
         isOutgoing = true;
       }
 
@@ -3096,7 +3115,7 @@
       bubble.className = bubbleClass;
 
       // Заголовок отправителя
-      const senderName = escapeHtml(msg.from_user_name || "Пользователь");
+      const senderName = escapeHtml(msg.from_user_name || (isOutgoing ? "Владелец" : "Собеседник"));
       const senderSub = msg.from_username ? ` (@${escapeHtml(msg.from_username)})` : "";
       let senderHtml = `<div class="bubble-sender">${senderName}${senderSub}</div>`;
 
@@ -3132,34 +3151,42 @@
         contentHtml = `<div class="bubble-text" style="color: var(--hint-color); font-style: italic;">(содержимое удалено)</div>`;
       }
 
-      // Медиавложения
+      // Медиавложения (Фото, Стикеры, Голосовые, Аудио, Видео, Кружочки)
       let mediaHtml = "";
-      if (msg.media_type) {
-        if (msg.has_media_file && msg.media_type === "photo") {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+      if (msg.media_type || msg.has_media_file) {
+        const mType = (msg.media_type || "").toLowerCase();
+        const mPath = (msg.media_path || "").toLowerCase();
+        const isPhotoOrImage = mType === "photo" || mType === "sticker" || mPath.endsWith(".webp") || mPath.endsWith(".jpg") || mPath.endsWith(".jpeg") || mPath.endsWith(".png");
+        const isVoiceOrAudio = mType === "voice" || mType === "audio" || mPath.endsWith(".oga") || mPath.endsWith(".ogg") || mPath.endsWith(".mp3") || mPath.endsWith(".opus");
+        const isVideoOrNote = mType === "video" || mType === "video_note" || mPath.endsWith(".mp4") || mPath.endsWith(".mov");
+
+        if (msg.has_media_file && isPhotoOrImage) {
+          const mediaUrl = getMediaUrl(msg.media_path, msg.media_token);
           mediaHtml = `
             <div class="bubble-media-preview">
               <img src="${mediaUrl}" class="bubble-media-img" loading="lazy" alt="Фото" onclick="window.open('${mediaUrl}', '_blank')">
             </div>
           `;
-        } else if (msg.has_media_file && (msg.media_type === "voice" || msg.media_type === "audio")) {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+        } else if (msg.has_media_file && isVoiceOrAudio) {
+          const mediaUrl = getMediaUrl(msg.media_path, msg.media_token);
           mediaHtml = `
-            <div class="bubble-media-preview">
-              <audio controls src="${mediaUrl}" style="width: 100%; height: 36px; border-radius: 8px;"></audio>
+            <div class="bubble-media-preview" style="min-width: 210px;">
+              <audio controls preload="metadata" src="${mediaUrl}" style="width: 100%; height: 38px; border-radius: 8px; margin-top: 4px;"></audio>
             </div>
           `;
-        } else if (msg.has_media_file && msg.media_type === "video") {
-          const mediaUrl = `/api/owner/media?path=${encodeURIComponent(msg.media_path)}`;
+        } else if (msg.has_media_file && isVideoOrNote) {
+          const mediaUrl = getMediaUrl(msg.media_path, msg.media_token);
+          const isCircle = (mType === "video_note");
+          const circleStyle = isCircle ? "border-radius: 50%; width: 220px; height: 220px; object-fit: cover;" : "max-width: 100%; max-height: 240px; border-radius: 8px;";
           mediaHtml = `
             <div class="bubble-media-preview">
-              <video controls src="${mediaUrl}" style="max-width: 100%; max-height: 240px; border-radius: 8px;"></video>
+              <video controls playsinline preload="metadata" src="${mediaUrl}" style="${circleStyle} margin-top: 4px;"></video>
             </div>
           `;
-        } else {
+        } else if (msg.media_type) {
           mediaHtml = `
             <div style="font-size: 11px; opacity: 0.7; margin-top: 5px;">
-              📎 Медиа: ${msg.has_media_file ? "✅ сохранено" : "❌ не сохранено"}
+              📎 ${getMediaLabel(msg.media_type)}: ${msg.has_media_file ? "✅ на сервере" : "❌ файл не найден"}
             </div>
           `;
         }
@@ -3208,6 +3235,8 @@
         video_note: "📹 Кружочек",
         audio: "🎵 Аудио",
         document: "📄 Документ",
+        sticker: "🎭 Стикер",
+        animation: "🎞 GIF",
       };
       return m[type] || `📁 ${type}`;
     }
