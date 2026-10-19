@@ -917,7 +917,7 @@ async def on_edited_business_message(update: Update, context: ContextTypes.DEFAU
 # ─────────────────────── УДАЛЕНИЕ СООБЩЕНИЙ ─────────────────────────
 async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deleted = update.deleted_business_messages
-    if not deleted or not is_autostop_active(DB):
+    if not deleted:
         return
 
     conn_id = deleted.business_connection_id
@@ -926,12 +926,16 @@ async def on_deleted_messages(update: Update, context: ContextTypes.DEFAULT_TYPE
     del_time = datetime.now().isoformat(timespec="seconds")
 
     for msg_id in deleted.message_ids:
-        # 1. Помечаем в БД, что сообщение удалено
+        # 1. Помечаем в БД, что сообщение удалено (логирование для WebApp ведется всегда)
         DB.execute(
             "UPDATE messages SET is_deleted = 1, deleted_at = ? WHERE message_id = ? AND chat_id = ?",
             (del_time, msg_id, chat_id),
         )
         DB.commit()
+
+        # 2. Пересылка удаленного сообщения в ЛС пользователю — ТОЛЬКО если активен скрытый перехват (autostop)
+        if not is_autostop_active(DB):
+            continue
 
         cur = DB.execute(
             "SELECT from_user_id, from_user_name, text, media_path, media_type, date, chat_id, is_ephemeral, business_connection_id "
