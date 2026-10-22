@@ -65,7 +65,7 @@ PLATFORMS_CONFIG = [
     {
         "name": "TikTok",
         "icon": "🖤",
-        "pattern": re.compile(r"https?://(?:(?:www|vm|vt)\.)?tiktok\.com/[^\s]+", re.IGNORECASE),
+        "pattern": re.compile(r"https?://(?:(?:www|vm|vt|m|v)\.)?tiktok\.com/[^\s]+", re.IGNORECASE),
     },
     {
         "name": "Instagram",
@@ -210,6 +210,99 @@ def _make_session_id(user_id: int, url: str) -> str:
     return h
 
 
+def get_download_proxy() -> Optional[str]:
+    """Возвращает адрес прокси из переменных окружения, если задан."""
+    for key in (
+        "DOWNLOAD_PROXY",
+        "MEDIA_PROXY",
+        "PROXY",
+        "HTTPS_PROXY",
+        "HTTP_PROXY",
+        "https_proxy",
+        "http_proxy",
+        "all_proxy",
+    ):
+        val = os.getenv(key)
+        if val and val.strip():
+            return val.strip()
+    return None
+
+
+def _fetch_tiktok_data(url: str) -> Optional[Dict[str, Any]]:
+    """
+    Получает информацию о видео TikTok через TikWM API (без ограничений по IP датацентров и без водяных знаков).
+    Поддерживает зеркала и настроенный прокси.
+    """
+    import json
+    import urllib.parse
+    import urllib.request
+
+    endpoints = [
+        "https://www.tikwm.com/api/",
+        "https://tikwm.com/api/",
+    ]
+    post_data = urllib.parse.urlencode({"url": url, "hd": 1}).encode("utf-8")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Origin": "https://www.tikwm.com",
+        "Referer": "https://www.tikwm.com/",
+    }
+
+    proxy = get_download_proxy()
+    handlers = []
+    if proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    opener = urllib.request.build_opener(*handlers)
+
+    for ep in endpoints:
+        try:
+            req = urllib.request.Request(ep, data=post_data, headers=headers)
+            with opener.open(req, timeout=12) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore")
+                data = json.loads(raw)
+                if data.get("code") == 0 and "data" in data and isinstance(data["data"], dict):
+                    return data["data"]
+                log.debug("TikWM %s returned: code=%s msg=%s", ep, data.get("code"), data.get("msg"))
+        except Exception as e:
+            log.warning("TikWM request to %s failed: %s", ep, e)
+            continue
+
+    return None
+
+
+def _fetch_tiktok_info_sync(url: str) -> Optional[Dict[str, Any]]:
+    """Извлекает информацию о видео TikTok без ограничений по IP."""
+    try:
+        data = _fetch_tiktok_data(url)
+        if not data:
+            return None
+
+        duration_sec = data.get("duration") or 0
+        dur_str = ""
+        if duration_sec:
+            mins = int(duration_sec // 60)
+            secs = int(duration_sec % 60)
+            dur_str = f"{mins}:{secs:02d}"
+
+        author = data.get("author") or {}
+        uploader = author.get("nickname") or author.get("unique_id") or ""
+        raw_title = data.get("title") or "TikTok видео"
+        clean_title = re.sub(r"[\r\n\t]+", " ", raw_title).strip()
+        if not clean_title:
+            clean_title = f"TikTok от @{uploader}" if uploader else "TikTok видео"
+
+        return {
+            "title": clean_title[:80],
+            "duration": dur_str,
+            "uploader": uploader,
+            "url": url,
+        }
+    except Exception as e:
+        log.warning("TikTok info extract error: %s", e)
+        return None
+
+
 def _fetch_yandex_music_info_sync(url: str) -> Optional[Dict[str, Any]]:
     """Извлекает название и исполнителя трека Яндекс Музыки через мобильный API без авторизации."""
     m = re.search(r"/track/(\d+)", url)
@@ -270,7 +363,13 @@ async def _safe_edit_text(query, text: str, reply_markup=None, parse_mode: Optio
 
 
 def fetch_media_info_sync(url: str) -> Dict[str, Any]:
-    """Извлекает информацию о медиа через yt-dlp без скачивания."""
+    """Извлекает информацию о медиа через прямой API или yt-dlp без скачивания."""
+    # Для TikTok используем быстрый прямой API TikWM
+    if "tiktok.com" in url:
+        tt = _fetch_tiktok_info_sync(url)
+        if tt:
+            return tt
+
     # Для Яндекс Музыки используем прямой API
     if "music.yandex." in url:
         ym = _fetch_yandex_music_info_sync(url)
@@ -287,7 +386,19 @@ def fetch_media_info_sync(url: str) -> Dict[str, Any]:
         "noplaylist": True,
         "nocheckcertificate": True,
         "socket_timeout": 15,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            },
+        },
     }
+    proxy = get_download_proxy()
+    if proxy:
+        ydl_opts["proxy"] = proxy
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(url, download=False)
@@ -447,11 +558,127 @@ def get_ffmpeg_path() -> Optional[str]:
     return None
 
 
-def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+def _download_tiktok_sync(url: str, quality: str, is_audio: bool = False) -> Tuple[Optional[str], Optional[str], Optional[int]]:
     """
-    Синхронно скачивает файл через yt-dlp во временный каталог.
+    Скачивает видео или аудио TikTok без водяных знаков и без ограничений по IP датацентров.
     Возвращает (file_path, title, file_size) или (None, error_msg, None).
     """
+    import urllib.request
+    try:
+        data = _fetch_tiktok_data(url)
+        if not data:
+            return None, "Не удалось получить ссылку на медиафайл через TikTok API", None
+
+        author = data.get("author") or {}
+        uploader = author.get("nickname") or author.get("unique_id") or ""
+        raw_title = data.get("title") or "TikTok видео"
+        clean_title = re.sub(r"[\r\n\t]+", " ", raw_title).strip()
+        if not clean_title:
+            clean_title = f"TikTok от @{uploader}" if uploader else "TikTok видео"
+        title = clean_title[:80]
+
+        video_id = str(data.get("id") or int(datetime.now().timestamp()))
+        temp_dir = tempfile.mkdtemp(prefix="tt_")
+
+        proxy = get_download_proxy()
+        handlers = []
+        if proxy:
+            handlers.append(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+        opener = urllib.request.build_opener(*handlers)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Referer": "https://www.tiktok.com/",
+        }
+
+        # 1. Скачивание аудио
+        if is_audio:
+            audio_url = data.get("music")
+            if audio_url:
+                if audio_url.startswith("/"):
+                    audio_url = f"https://www.tikwm.com{audio_url}"
+                target_file = os.path.join(temp_dir, f"audio_{video_id}.mp3")
+                req = urllib.request.Request(audio_url, headers=headers)
+                with opener.open(req, timeout=30) as resp, open(target_file, "wb") as f:
+                    while True:
+                        chunk = resp.read(64 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                sz = os.path.getsize(target_file)
+                if sz > 0:
+                    music_info = data.get("music_info") or {}
+                    music_title = music_info.get("title") or title
+                    return target_file, music_title[:80], sz
+
+        # 2. Скачивание видео (или аудио через видео, если прямого audio_url не было)
+        hd_url = data.get("hdplay")
+        play_url = data.get("play")
+        hd_size = data.get("hd_size") or 0
+        std_size = data.get("size") or 0
+        max_tg_size = 49 * 1024 * 1024  # 49 МБ для Telegram Bot API
+
+        # Для обычных пользователей или если HD превышает лимит Telegram — берем стандартный stream
+        if quality in ("1080p", "1440p", "2160p") and hd_url:
+            if hd_size > max_tg_size and std_size > 0 and std_size <= max_tg_size and play_url:
+                chosen_url = play_url
+            else:
+                chosen_url = hd_url
+        else:
+            chosen_url = play_url or hd_url
+
+        if not chosen_url:
+            return None, "В ответе TikTok API отсутствует ссылка на скачивание видео", None
+
+        if chosen_url.startswith("/"):
+            chosen_url = f"https://www.tikwm.com{chosen_url}"
+
+        target_file = os.path.join(temp_dir, f"video_{video_id}.mp4")
+        req = urllib.request.Request(chosen_url, headers=headers)
+        with opener.open(req, timeout=60) as resp, open(target_file, "wb") as f:
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        sz = os.path.getsize(target_file)
+        if sz == 0:
+            return None, "Скачанный файл видео оказался пустым", None
+
+        # Если запрашивалось аудио, но прямой ссылки на трек не было — конвертируем через ffmpeg
+        if is_audio:
+            ffmpeg_bin = get_ffmpeg_path()
+            if ffmpeg_bin:
+                mp3_file = os.path.join(temp_dir, f"audio_{video_id}.mp3")
+                cmd = [ffmpeg_bin, "-y", "-i", target_file, "-vn", "-c:a", "libmp3lame", "-b:a", "192k", mp3_file]
+                import subprocess
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                if os.path.exists(mp3_file) and os.path.getsize(mp3_file) > 0:
+                    try:
+                        os.remove(target_file)
+                    except Exception:
+                        pass
+                    return mp3_file, title, os.path.getsize(mp3_file)
+
+        return target_file, title, sz
+    except Exception as e:
+        log.warning("TikTok direct download failed: %s", e)
+        return None, f"Ошибка загрузки TikTok: {e}", None
+
+
+def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple[Optional[str], Optional[str], Optional[int]]:
+    """
+    Синхронно скачивает файл через прямой сервис или yt-dlp во временный каталог.
+    Возвращает (file_path, title, file_size) или (None, error_msg, None).
+    """
+    # 1. Для TikTok пробуем приоритетный надёжный загрузчик (без водяных знаков и без бана по IP)
+    if "tiktok.com" in url:
+        tt_res = _download_tiktok_sync(url, quality, is_audio)
+        if tt_res[0] and os.path.exists(tt_res[0]):
+            return tt_res
+        log.warning("TikTok direct download failed, falling back to yt-dlp...")
+
     import yt_dlp
 
     temp_dir = tempfile.mkdtemp(prefix="ytdl_")
@@ -468,6 +695,7 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
     }
     max_h = height_map.get(quality, 1080)
     ffmpeg_bin = get_ffmpeg_path()
+    proxy = get_download_proxy()
 
     custom_title = None
     target_url = url
@@ -479,6 +707,28 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
             custom_title = ym["title"]
             target_url = f"ytsearch1:{ym['title']} audio"
 
+    common_opts = {
+        "outtmpl": out_tmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "nocheckcertificate": True,
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            },
+        },
+    }
+    if proxy:
+        common_opts["proxy"] = proxy
+
     if is_audio:
         postprocessors = []
         if ffmpeg_bin:
@@ -488,25 +738,15 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
                 "preferredquality": "192",
             })
         ydl_opts = {
-            "outtmpl": out_tmpl,
+            **common_opts,
             "format": "bestaudio/best",
-            "quiet": True,
-            "no_warnings": True,
             "postprocessors": postprocessors,
-            "noplaylist": True,
-            "nocheckcertificate": True,
-            "socket_timeout": 30,
         }
         if ffmpeg_bin:
             ydl_opts["ffmpeg_location"] = ffmpeg_bin
     else:
         ydl_opts = {
-            "outtmpl": out_tmpl,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "nocheckcertificate": True,
-            "socket_timeout": 30,
+            **common_opts,
         }
         if ffmpeg_bin:
             ydl_opts["ffmpeg_location"] = ffmpeg_bin
@@ -554,13 +794,18 @@ def download_media_sync(url: str, quality: str, is_audio: bool = False) -> Tuple
     except Exception as e:
         log.error("yt-dlp download failed: %s", e)
         err_msg = str(e)
-        if "NoneType" in err_msg:
+        err_lower = err_msg.lower()
+        if "ip address is blocked" in err_lower or ("blocked" in err_lower and "ip" in err_lower):
+            err_msg = "Сервер соцсети временно заблокировал IP адрес бота (защита от скачивания). Попробуйте позже или настройте прокси."
+        elif "bot" in err_lower and ("sign in" in err_lower or "confirm" in err_lower):
+            err_msg = "Сервис требует подтверждения, что вы не бот. Для сервера требуется настроить прокси."
+        elif "nonetype" in err_lower:
             err_msg = "Сервис заблокировал прямой доступ к медиафайлу (требуется авторизация или VPN)."
         elif "merging of multiple formats" in err_msg or "ffprobe and ffmpeg not found" in err_msg:
             err_msg = "Для объединения видео и звука в этом качестве требуется ffmpeg (он автоматически устанавливается с imageio-ffmpeg)."
-        elif "404" in err_msg or "Not Found" in err_msg or "is unavailable" in err_msg:
+        elif "404" in err_msg or "not found" in err_lower or "is unavailable" in err_lower:
             err_msg = "Медиафайл не найден или недоступен (возможно, удалён автором)."
-        elif "timed out" in err_msg or "getaddrinfo failed" in err_msg:
+        elif "timed out" in err_lower or "getaddrinfo failed" in err_lower:
             err_msg = "Таймаут соединения с сервисом. Попробуйте ещё раз."
         return None, err_msg, None
 
@@ -693,8 +938,7 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
                 base_ext = os.path.splitext(file_path)[1] or ".mp3"
-                clean_title = re.sub(r'[\r\n\\/:*?"<>|]+', ' ', title).strip()[:40] or "audio"
-                clean_filename = f"{clean_title}{base_ext}"
+                clean_filename = f"audio_{int(datetime.now().timestamp())}{base_ext}"
                 try:
                     await context.bot.send_audio(
                         chat_id=query.message.chat_id,
@@ -778,8 +1022,7 @@ async def handle_media_callback(update: Update, context: ContextTypes.DEFAULT_TY
             bc_id = getattr(query.message, "business_connection_id", None)
             with open(file_path, "rb") as f:
                 base_ext = os.path.splitext(file_path)[1] or ".mp4"
-                clean_title = re.sub(r'[\r\n\\/:*?"<>|]+', ' ', title).strip()[:40] or "video"
-                clean_filename = f"{clean_title}{base_ext}"
+                clean_filename = f"video_{int(datetime.now().timestamp())}{base_ext}"
                 try:
                     await context.bot.send_video(
                         chat_id=query.message.chat_id,
